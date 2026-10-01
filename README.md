@@ -163,6 +163,37 @@ The kinds come from directory names and a few shapes (a bare git repository,
 `target` beside a `Cargo.toml`). Some of the names are specific to one
 machine; see `crates/disktree-core/src/classify.rs`.
 
+### Raised blocks and file-type colours
+
+Two checkboxes in the top bar change how the mosaic is drawn. Both are off by
+default, so the flat category look above is what opens:
+
+- **3D blocks** lifts each tile into a lit, bevel-edged block: a gradient from
+  its top-left to its bottom-right, then a lighter edge above and on the left
+  and a darker one below and on the right.
+- **File type colors** colours files by their extension, and directories by
+  the file type they are mostly made of, instead of by category.
+
+The file-type colours come from `disktree.ext.colors.txt`, looked up beside
+the executable, in the working directory, then under `%APPDATA%\disktree`
+(`~/.config/disktree`) — the same places as a language file. One line per
+extension, `extension=#rrggbb` (`#rgb` also works); `#` starts a comment.
+Extensions match without case and without the dot. A directory has no
+extension of its own, so it takes the colour of the extension holding the most
+bytes beneath it — twenty gigabytes of music beside a hundred of film make a
+media folder read as film. An extension with no line keeps its category
+colour, so a partly filled file is safe.
+
+```
+# disktree.ext.colors.txt
+mp3=#e0a020
+mp4=#b03060
+jpg=#3080d0
+```
+
+The file is read at startup and again every time **File type colors** is
+switched on, so an edit takes effect without restarting.
+
 ### Marking
 
 Space, X, Enter and the arrows act on the tile under the mouse if the mouse

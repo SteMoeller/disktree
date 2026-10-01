@@ -17,7 +17,7 @@ use gpui_kit::{
     InteractiveElement as _, IntoElement, MouseDownEvent, MouseMoveEvent,
     ParentElement as _, Pixels, Point, ScrollWheelEvent, SharedString, Size,
     StatefulInteractiveElement as _, Styled, TextAlign, TextRun, Window,
-    canvas, div, pattern_slash, px, quad,
+    canvas, div, linear_color_stop, linear_gradient, pattern_slash, px, quad,
 };
 use gpui_omarchy::{ActiveTheme, Theme};
 
@@ -36,6 +36,10 @@ pub struct TileDeco {
     pub depth: u32,
     /// What kind of data it is: the hue.
     pub category: Category,
+    /// A colour configured for its file type, when *File type colors* is on
+    /// and one is set: it wins over the category hue. A directory carries the
+    /// colour of the extension it holds the most bytes of.
+    pub ext_color: Option<Hsla>,
     /// In age mode, which [`palette::AGE_BUCKETS`] entry it falls in.
     pub age_bucket: Option<usize>,
     /// Its space can be had back: hatched.
@@ -57,6 +61,9 @@ pub struct Mosaic {
     pub tiles: Vec<TileDeco>,
     pub labels: Vec<Label>,
     pub view: View,
+    /// Draw each tile as a raised block: a lit gradient body with a bevel,
+    /// instead of a flat fill.
+    pub blocks_3d: bool,
 }
 
 /// Build the treemap viewport: canvas, input, and the cursor tooltip.
@@ -80,6 +87,7 @@ pub fn mosaic(
         tiles,
         labels,
         view,
+        blocks_3d,
     } = mosaic;
     let canvas_origin = Rc::clone(&origin);
     let canvas_measured = Rc::clone(&measured);
@@ -127,7 +135,9 @@ pub fn mosaic(
                     bounds.size
                 },
                 move |bounds, _, window, cx| {
-                    paint_tiles(&tiles, bounds, view, &colors, window);
+                    paint_tiles(
+                        &tiles, bounds, view, &colors, blocks_3d, window,
+                    );
                     paint_labels(
                         &labels, bounds, view, &colors, &font, name_size,
                         size_size, window, cx,
@@ -141,6 +151,9 @@ pub fn mosaic(
 
 /// Theme colours resolved once per frame.
 struct Colors {
+    /// Kept whole: a configured file-type colour is turned into a fill and an
+    /// accent here, where the theme is at hand.
+    theme: Theme,
     label: [Hsla; 2],
     label_dim: Hsla,
     hover_border: Hsla,
@@ -189,6 +202,7 @@ impl Colors {
             std::array::from_fn(|depth| fill(depth as u32))
         };
         Self {
+            theme: theme.clone(),
             label: [
                 palette::label_color(theme, 0),
                 palette::label_color(theme, 1),
@@ -228,9 +242,16 @@ impl Colors {
             return self.marked_fill;
         }
         let depth = (tile.depth as usize).min(DEPTHS - 1);
-        let fill = match tile.age_bucket {
-            Some(bucket) => self.age[bucket.min(self.age.len() - 1)][depth],
-            None => self.fill[category_index(tile.category)][depth],
+        let fill = match (tile.age_bucket, tile.ext_color) {
+            // Age wins: its ramp is the whole message.
+            (Some(bucket), _) => {
+                self.age[bucket.min(self.age.len() - 1)][depth]
+            }
+            // A configured file-type colour replaces the category hue.
+            (None, Some(color)) => {
+                palette::type_fill(&self.theme, color, tile.depth)
+            }
+            (None, None) => self.fill[category_index(tile.category)][depth],
         };
         // Only what matches keeps its colour; a directory holding matches
         // steps back less, so the way to them stays readable.
@@ -244,6 +265,15 @@ impl Colors {
     const fn label(&self, depth: u32) -> Hsla {
         self.label[if depth == 0 { 0 } else { 1 }]
     }
+
+    /// The accent strip over a top-level directory: the category's, or the
+    /// configured file-type colour's when one is set.
+    fn accent(&self, tile: &TileDeco) -> Hsla {
+        match tile.ext_color {
+            Some(color) => palette::type_accent(&self.theme, color),
+            None => self.strip[category_index(tile.category)],
+        }
+    }
 }
 
 fn paint_tiles(
@@ -251,11 +281,16 @@ fn paint_tiles(
     bounds: Bounds<Pixels>,
     view: View,
     colors: &Colors,
+    blocks_3d: bool,
     window: &mut Window,
 ) {
     let none = Edges::all(px(0.));
     let solid = gpui_kit::BorderStyle::Solid;
     let scale = window.scale_factor();
+    // A raised block's bevel, in rem like everything else, so it keeps its
+    // relationship to the tiles at every interface-zoom step; never thinner
+    // than a pixel, or it would disappear.
+    let bevel = px((window.rem_size().as_f32() * 0.0625).max(1.0));
     // Outlines are drawn after every fill: a directory's children paint over
     // its body, and would otherwise cover its selection ring, leaving only
     // slivers of it showing in the gaps between them.
@@ -267,16 +302,20 @@ fn paint_tiles(
         }
         let quad_bounds = snap(to_window(&rect, bounds), scale);
 
-        // No border by default: the gaps between tiles, wider between the
-        // top-level directories, are what separate them.
-        window.paint_quad(quad(
-            quad_bounds,
-            Corners::default(),
-            colors.fill(tile),
-            none,
-            colors.hover_border,
-            solid,
-        ));
+        if blocks_3d {
+            paint_block(window, quad_bounds, colors.fill(tile), bevel);
+        } else {
+            // No border by default: the gaps between tiles, wider between the
+            // top-level directories, are what separate them.
+            window.paint_quad(quad(
+                quad_bounds,
+                Corners::default(),
+                colors.fill(tile),
+                none,
+                colors.hover_border,
+                solid,
+            ));
+        }
 
         // Reclaimable space is hatched, over any hue: the hatch answers
         // "can it go", the colour "what is it". Everything inside a
@@ -313,7 +352,7 @@ fn paint_tiles(
             window.paint_quad(quad(
                 strip,
                 Corners::default(),
-                colors.strip[category_index(tile.category)],
+                colors.accent(tile),
                 none,
                 colors.hover_border,
                 solid,
@@ -364,6 +403,78 @@ fn paint_tiles(
             solid,
         ));
     }
+}
+
+/// A tile drawn as a raised block: a body lit toward its top-left and shaded
+/// toward its bottom-right, then four bevel edges on top, lighter than the body
+/// above and on the left, darker below and on the right. No shadows are painted
+/// between blocks — their sizes would need the neighbours, and the bevel alone
+/// reads as depth.
+fn paint_block(
+    window: &mut Window,
+    bounds: Bounds<Pixels>,
+    base: Hsla,
+    bevel: Pixels,
+) {
+    let none = Edges::all(px(0.));
+    let solid = gpui_kit::BorderStyle::Solid;
+    let clear = gpui_kit::transparent_black();
+    // The gradient runs from the lit corner to the shaded one diagonally,
+    // which is what makes a cushion read as raised rather than banded.
+    let (light, dark) = palette::cushion_ends(base);
+    window.paint_quad(quad(
+        bounds,
+        Corners::default(),
+        linear_gradient(
+            135.0,
+            linear_color_stop(light, 0.0),
+            linear_color_stop(dark, 1.0),
+        ),
+        none,
+        clear,
+        solid,
+    ));
+
+    // A tile too small to hold two bevels keeps the gradient alone.
+    let width = bevel
+        .as_f32()
+        .min(bounds.size.width.as_f32() * 0.25)
+        .min(bounds.size.height.as_f32() * 0.25);
+    if width < 1.0 {
+        return;
+    }
+    let width = px(width);
+    let lit = Edges {
+        top: width,
+        right: px(0.),
+        bottom: px(0.),
+        left: width,
+    };
+    let shaded = Edges {
+        top: px(0.),
+        right: width,
+        bottom: width,
+        left: px(0.),
+    };
+    // Only the border draws: the body is transparent, so the gradient below
+    // shows through the middle. Two quads, because one quad has one border
+    // colour and a bevel needs two.
+    window.paint_quad(quad(
+        bounds,
+        Corners::default(),
+        clear,
+        lit,
+        light,
+        solid,
+    ));
+    window.paint_quad(quad(
+        bounds,
+        Corners::default(),
+        clear,
+        shaded,
+        dark,
+        solid,
+    ));
 }
 
 /// Round a rectangle's edges to device pixels. Tiles land on fractional

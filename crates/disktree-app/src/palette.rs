@@ -63,6 +63,55 @@ pub fn category_accent(theme: &Theme, category: Category) -> Hsla {
     Hsla { h, s, l, a: 1.0 }
 }
 
+/// A configured file-type colour as a tile fill, at `depth` levels into the
+/// view.
+///
+/// Lifted a little with depth like a category fill, so nesting still reads
+/// once colour no longer says it, and pulled toward the theme surface so a
+/// colour picked for one theme still sits inside the other.
+pub fn type_fill(theme: &Theme, color: Hsla, depth: u32) -> Hsla {
+    let step = depth.min(4) as f32;
+    let delta = if dark(theme) {
+        step * 0.028
+    } else {
+        -step * 0.03
+    };
+    let lifted = Hsla {
+        l: (color.l + delta).clamp(0.0, 1.0),
+        ..color
+    };
+    mix(lifted, theme.inset, 0.1)
+}
+
+/// The saturated version of a file-type colour: the strip over a top-level
+/// directory, matching [`category_accent`].
+pub fn type_accent(theme: &Theme, color: Hsla) -> Hsla {
+    Hsla {
+        s: (color.s * 1.25).min(1.0),
+        l: if dark(theme) { 0.52 } else { 0.46 },
+        ..color
+    }
+}
+
+/// The two ends of a raised block's gradient: the colour lifted toward the
+/// light at its top-left and dropped toward the shade at its bottom-right.
+/// Mixed in RGB, so the hue stays put.
+pub fn cushion_ends(base: Hsla) -> (Hsla, Hsla) {
+    let white = Hsla::from(Rgba {
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
+        a: 1.0,
+    });
+    let black = Hsla::from(Rgba {
+        r: 0.0,
+        g: 0.0,
+        b: 0.0,
+        a: 1.0,
+    });
+    (mix(base, white, 0.3), mix(base, black, 0.32))
+}
+
 /// The age ramp, newest first: this week, this month, this half-year, this
 /// year, older.
 pub const AGE_BUCKETS: [(i64, &str); 5] = [
@@ -257,5 +306,37 @@ mod tests {
         let clamped_high = mix(theme.background, theme.accent, 2.0).l;
         assert!((clamped_low - theme.background.l).abs() < 1e-3);
         assert!((clamped_high - theme.accent.l).abs() < 1e-3);
+    }
+
+    #[test]
+    fn a_raised_block_is_lit_at_its_top_and_shaded_at_its_foot() {
+        let base = Hsla {
+            h: 0.6,
+            s: 0.3,
+            l: 0.5,
+            a: 1.0,
+        };
+        let (light, dark) = cushion_ends(base);
+        assert!(light.l > base.l, "the lit end is lighter");
+        assert!(dark.l < base.l, "the shaded end is darker");
+        assert!((light.h - base.h).abs() < 0.02, "the hue stays put");
+    }
+
+    #[test]
+    fn a_file_type_colour_still_lifts_with_depth() {
+        for appearance in [ThemeAppearance::Dark, ThemeAppearance::Light] {
+            let theme = theme(appearance);
+            let color = Hsla {
+                h: 0.1,
+                s: 0.6,
+                l: 0.5,
+                a: 1.0,
+            };
+            let top = type_fill(&theme, color, 0);
+            let deep = type_fill(&theme, color, 3);
+            // Away from the background: lighter on dark, darker on light.
+            let distance = |fill: Hsla| (fill.l - theme.background.l).abs();
+            assert!(distance(deep) > distance(top) + 0.05, "{appearance:?}");
+        }
     }
 }

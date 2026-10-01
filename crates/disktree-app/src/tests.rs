@@ -115,6 +115,36 @@ fn the_window_draws_a_treemap_with_tiles(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn the_rendering_toggles_change_the_drawing_and_default_off(
+    cx: &mut TestAppContext,
+) {
+    cx.update(gpui_omarchy::init);
+    let temp = fixture();
+    let (view, cx) = view_over(temp.path(), cx);
+    draw(cx);
+
+    // Off by default: the flat category fill, no raised blocks, no file-type
+    // colours. This is the look the README describes.
+    let mosaic = update(&view, cx, |app, _| app.prepare());
+    assert!(!mosaic.blocks_3d, "raised blocks are opt-in");
+    assert!(!read(&view, cx, |app| app.ext_colors));
+    assert!(mosaic.tiles.iter().all(|tile| tile.ext_color.is_none()));
+
+    // Raised blocks: the flag rides into the painted frame.
+    update(&view, cx, |app, cx| app.set_blocks_3d(true, cx));
+    draw(cx);
+    let mosaic = update(&view, cx, |app, _| app.prepare());
+    assert!(mosaic.blocks_3d);
+
+    // Back off draws exactly as before again.
+    update(&view, cx, |app, cx| app.set_blocks_3d(false, cx));
+    draw(cx);
+    let mosaic = update(&view, cx, |app, _| app.prepare());
+    assert!(!mosaic.blocks_3d);
+    assert!(mosaic.tiles.iter().all(|tile| tile.ext_color.is_none()));
+}
+
+#[gpui_kit::test]
 fn the_first_scan_shows_what_it_is_doing_then_the_treemap(
     cx: &mut TestAppContext,
 ) {

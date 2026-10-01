@@ -12,10 +12,11 @@
 //! common to trust: `target` is only a build directory beside a `Cargo.toml`.
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 
 use rayon::prelude::*;
 
-use crate::tree::Node;
+use crate::tree::{Node, NodeKind};
 
 /// A kind of data, for colour.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -342,6 +343,67 @@ pub fn is_git_store(node: &Node) -> bool {
     node.is_dir() && has("objects") && has("refs") && has("HEAD")
 }
 
+/// A file name's extension, lowercased without its dot, or `None`.
+///
+/// `None` for a name with no dot (`notes`), a trailing dot (`notes.`) and a
+/// dotfile whose whole name is the extension (`.gitignore`). A dot later on
+/// still counts, so `.config.json` is `json` and `archive.tar.gz` is `gz`.
+/// Already-lowercase extensions borrow the name rather than allocating: this
+/// runs once per file, and a directory can hold hundreds of thousands.
+pub fn file_extension(name: &str) -> Option<Cow<'_, str>> {
+    let dot = name.rfind('.')?;
+    let extension = name.get(dot + 1..)?;
+    if extension.is_empty() || dot == 0 {
+        return None;
+    }
+    if extension.bytes().any(|byte| byte.is_ascii_uppercase()) {
+        Some(Cow::Owned(extension.to_ascii_lowercase()))
+    } else {
+        Some(Cow::Borrowed(extension))
+    }
+}
+
+/// The file extension holding the most bytes in `node`'s subtree, files
+/// only: what a directory is mostly made of. `None` when no file beneath it
+/// has an extension.
+///
+/// Bytes, not file count: twenty gigabytes of music beside a hundred of film
+/// make a media directory the film's kind, and hardlink de-duplication has
+/// already zeroed the duplicates [`crate::tree::aggregate`] left them.
+pub fn dominant_extension(node: &Node) -> Option<String> {
+    let mut tally: HashMap<Cow<'_, str>, u64> = HashMap::new();
+    tally_extensions(node, &mut tally);
+    tally
+        .into_iter()
+        .max_by(|left, right| {
+            // Largest first; a tie is broken on the name, so the answer is
+            // the same whatever order the map iterates in.
+            left.1.cmp(&right.1).then_with(|| right.0.cmp(&left.0))
+        })
+        .map(|(extension, _)| extension.into_owned())
+}
+
+fn tally_extensions<'a>(
+    node: &'a Node,
+    tally: &mut HashMap<Cow<'a, str>, u64>,
+) {
+    if node.is_dir() {
+        for child in &node.children {
+            tally_extensions(child, tally);
+        }
+        return;
+    }
+    // Only real files count: what a deletion frees is the claim, and a
+    // symlink or device is not the bytes this directory is mostly made of.
+    if node.kind != NodeKind::File {
+        return;
+    }
+    let Some(extension) = file_extension(&node.name) else {
+        return;
+    };
+    *tally.entry(extension).or_default() += node.bytes;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -615,5 +677,43 @@ mod tests {
             assert_ne!(category, Category::Other);
             assert!(!category.label().is_empty());
         }
+    }
+
+    #[test]
+    fn an_extension_is_the_part_after_the_last_dot() {
+        assert_eq!(file_extension("notes").as_deref(), None);
+        assert_eq!(file_extension("notes.").as_deref(), None);
+        // A dotfile's whole name is the "extension", which is not one.
+        assert_eq!(file_extension(".gitignore").as_deref(), None);
+        assert_eq!(file_extension("song.MP3").as_deref(), Some("mp3"));
+        assert_eq!(file_extension(".config.json").as_deref(), Some("json"));
+        assert_eq!(file_extension("archive.tar.gz").as_deref(), Some("gz"));
+    }
+
+    #[test]
+    fn a_directory_is_coloured_by_its_heaviest_extension() {
+        let mut root = dir(
+            "music",
+            vec![
+                file("a.mp3", 20),
+                file("b.MKV", 100),
+                file("c.mkv", 5),
+                dir("sub", vec![file("d.mp3", 1)]),
+                file("README", 50),
+            ],
+        );
+        aggregate(&mut root, Metric::Bytes);
+        // Case-insensitive: MKV and mkv pool, and beat the mp3s together.
+        assert_eq!(dominant_extension(&root).as_deref(), Some("mkv"));
+
+        // A tie is broken on the name, so it does not depend on map order.
+        let mut tied = dir("t", vec![file("a.aaa", 10), file("b.bbb", 10)]);
+        aggregate(&mut tied, Metric::Bytes);
+        assert_eq!(dominant_extension(&tied).as_deref(), Some("aaa"));
+
+        // Nothing with an extension: nothing to colour by.
+        let mut plain = dir("p", vec![file("README", 1)]);
+        aggregate(&mut plain, Metric::Bytes);
+        assert_eq!(dominant_extension(&plain), None);
     }
 }
