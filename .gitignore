@@ -1,1 +1,4 @@
 /target
+# build.ps1 installs a repository-local Rust toolchain here when it cannot
+# (or should not) install one system-wide.
+/.tools/
