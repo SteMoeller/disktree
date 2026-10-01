@@ -10,6 +10,10 @@
 //! the working directory, then the user's config directory. The first file
 //! found for a language wins. English is built in; an external
 //! `disktree.en.i18n.txt` overrides it.
+//!
+//! The app starts in the system's language when a file for it was found —
+//! a German Windows opens German — and in English otherwise. The picker in
+//! the footer still overrides that.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -68,10 +72,73 @@ pub fn load() {
     }
     languages[1..].sort_by(|left, right| left.code.cmp(&right.code));
 
+    // Start in the system's language when one was found; English otherwise.
+    let codes: Vec<String> = languages
+        .iter()
+        .map(|language| language.code.clone())
+        .collect();
+    let start = pick_language(&system_language().unwrap_or_default(), &codes);
+
     let _ = CATALOG.set(Catalog {
         languages,
-        current: AtomicUsize::new(0),
+        current: AtomicUsize::new(start),
     });
+}
+
+/// The index of the language to start in: the system's when a file for that
+/// language was found, English (index 0) otherwise.
+fn pick_language(system: &str, found: &[String]) -> usize {
+    let code = language_code(system);
+    found
+        .iter()
+        .position(|language| *language == code)
+        .unwrap_or(0)
+}
+
+/// `de-DE`, `de_AT`, `de-CH.UTF-8` and `DE` all give `de`: the part before
+/// the first `-`, `_` or `.`, lowercased.
+fn language_code(system: &str) -> String {
+    system
+        .split(['-', '_', '.'])
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase()
+}
+
+/// The language the system is set to, if it can be told: `LC_ALL`,
+/// `LC_MESSAGES` or `LANG` on Unix; there is no such variable on Windows, so
+/// the user's locale comes from Win32.
+#[cfg(not(windows))]
+fn system_language() -> Option<String> {
+    ["LC_ALL", "LC_MESSAGES", "LANG"]
+        .into_iter()
+        .find_map(|name| std::env::var(name).ok())
+        .filter(|value| !value.is_empty())
+}
+
+/// The user's locale on Windows, `de-DE` and the like.
+#[cfg(windows)]
+#[allow(
+    unsafe_code,
+    reason = "one kernel32 call that fills a buffer this function owns"
+)]
+fn system_language() -> Option<String> {
+    use windows_sys::Win32::Globalization::GetUserDefaultLocaleName;
+    // `LOCALE_NAME_MAX_LENGTH`, the size the API is documented for.
+    const LOCALE_NAME_MAX_LENGTH: i32 = 85;
+    let mut buffer = [0u16; LOCALE_NAME_MAX_LENGTH as usize];
+    // SAFETY: the buffer is ours and the length is its size in `u16`s, which
+    // is what the API writes into; it writes at most that many.
+    let written = unsafe {
+        GetUserDefaultLocaleName(buffer.as_mut_ptr(), LOCALE_NAME_MAX_LENGTH)
+    };
+    if written <= 0 {
+        return None;
+    }
+    // `written` counts the terminating NUL.
+    let name = String::from_utf16_lossy(&buffer[..written as usize - 1]);
+    (!name.is_empty()).then_some(name)
 }
 
 /// The key's text in the current language, else English, else the key.
@@ -284,5 +351,32 @@ mod tests {
         let a = "1 GiB";
         let b = "2 GiB";
         assert_eq!(tf("{0} free of {1}", &[&a, &b]), "1 GiB free of 2 GiB");
+    }
+
+    #[test]
+    fn a_locale_is_reduced_to_its_language() {
+        assert_eq!(language_code("de-DE"), "de");
+        assert_eq!(language_code("de_AT"), "de");
+        assert_eq!(language_code("de-CH.UTF-8"), "de");
+        assert_eq!(language_code("DE"), "de");
+        assert_eq!(language_code("en-US"), "en");
+        assert_eq!(language_code("C"), "c");
+        assert_eq!(language_code(""), "");
+    }
+
+    #[test]
+    fn the_system_language_wins_only_when_a_file_was_found() {
+        let found = ["en".to_string(), "de".to_string(), "fr".to_string()];
+        assert_eq!(pick_language("de-DE", &found), 1);
+        assert_eq!(pick_language("de_AT", &found), 1);
+        assert_eq!(pick_language("en-US", &found), 0);
+        assert_eq!(pick_language("fr-FR", &found), 2);
+        // Unknown, empty and a POSIX locale fall back to English.
+        assert_eq!(pick_language("xx-YY", &found), 0);
+        assert_eq!(pick_language("", &found), 0);
+        assert_eq!(pick_language("C", &found), 0);
+        // A language with no file is never chosen.
+        let only_en = ["en".to_string()];
+        assert_eq!(pick_language("de-DE", &only_en), 0);
     }
 }
