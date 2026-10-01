@@ -67,8 +67,8 @@ pub fn category_accent(theme: &Theme, category: Category) -> Hsla {
 /// view.
 ///
 /// Lifted a little with depth like a category fill, so nesting still reads
-/// once colour no longer says it, and pulled toward the theme surface so a
-/// colour picked for one theme still sits inside the other.
+/// once colour no longer says it. The colour is otherwise left alone: it was
+/// chosen on purpose, so it is not washed toward the theme surface.
 pub fn type_fill(theme: &Theme, color: Hsla, depth: u32) -> Hsla {
     let step = depth.min(4) as f32;
     let delta = if dark(theme) {
@@ -76,11 +76,11 @@ pub fn type_fill(theme: &Theme, color: Hsla, depth: u32) -> Hsla {
     } else {
         -step * 0.03
     };
-    let lifted = Hsla {
+    Hsla {
+        s: (color.s * 1.2).min(1.0),
         l: (color.l + delta).clamp(0.0, 1.0),
         ..color
-    };
-    mix(lifted, theme.inset, 0.1)
+    }
 }
 
 /// The saturated version of a file-type colour: the strip over a top-level
@@ -93,23 +93,37 @@ pub fn type_accent(theme: &Theme, color: Hsla) -> Hsla {
     }
 }
 
-/// The two ends of a raised block's gradient: the colour lifted toward the
-/// light at its top-left and dropped toward the shade at its bottom-right.
-/// Mixed in RGB, so the hue stays put.
-pub fn cushion_ends(base: Hsla) -> (Hsla, Hsla) {
-    let white = Hsla::from(Rgba {
+fn white() -> Hsla {
+    Hsla::from(Rgba {
         r: 1.0,
         g: 1.0,
         b: 1.0,
         a: 1.0,
-    });
-    let black = Hsla::from(Rgba {
+    })
+}
+
+fn black() -> Hsla {
+    Hsla::from(Rgba {
         r: 0.0,
         g: 0.0,
         b: 0.0,
         a: 1.0,
-    });
-    (mix(base, white, 0.3), mix(base, black, 0.32))
+    })
+}
+
+/// The two ends of a raised block's body: the colour lifted well toward the
+/// light at its top-left and dropped well toward the shade at its
+/// bottom-right, so the block reads as raised rather than as a flat fill.
+/// Mixed in RGB, so the hue stays put.
+pub fn cushion_ends(base: Hsla) -> (Hsla, Hsla) {
+    (mix(base, white(), 0.5), mix(base, black(), 0.5))
+}
+
+/// The block's bevel edges, brighter and darker than the body beneath them:
+/// a hard edge is what makes the block look like a solid object instead of a
+/// soft gradient.
+pub fn cushion_edges(base: Hsla) -> (Hsla, Hsla) {
+    (mix(base, white(), 0.82), mix(base, black(), 0.75))
 }
 
 /// The age ramp, newest first: this week, this month, this half-year, this
@@ -317,9 +331,31 @@ mod tests {
             a: 1.0,
         };
         let (light, dark) = cushion_ends(base);
-        assert!(light.l > base.l, "the lit end is lighter");
-        assert!(dark.l < base.l, "the shaded end is darker");
+        assert!(light.l > base.l + 0.1, "the lit end is clearly lighter");
+        assert!(dark.l < base.l - 0.1, "the shaded end is clearly darker");
         assert!((light.h - base.h).abs() < 0.02, "the hue stays put");
+
+        // The bevel edges are brighter and darker still, so the block reads
+        // as a solid object rather than a soft gradient.
+        let (highlight, shadow) = cushion_edges(base);
+        assert!(highlight.l > light.l, "the lit edge is brighter");
+        assert!(shadow.l < dark.l, "the shaded edge is darker");
+    }
+
+    #[test]
+    fn a_file_type_colour_is_not_washed_out() {
+        let theme = theme(ThemeAppearance::Dark);
+        let color = Hsla {
+            h: 0.02,
+            s: 0.9,
+            l: 0.55,
+            a: 1.0,
+        };
+        let fill = type_fill(&theme, color, 0);
+        // At the top level the colour is kept: its saturation is nudged up,
+        // never pulled toward the theme surface.
+        assert!(fill.s >= color.s, "saturation is not drained");
+        assert!((fill.l - color.l).abs() < 1e-6, "lightness is untouched");
     }
 
     #[test]

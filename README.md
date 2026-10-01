@@ -191,6 +191,10 @@ mp4=#b03060
 jpg=#3080d0
 ```
 
+A thorough example covering images, music, video, text, web, source code,
+office, archives, fonts, executables and databases ships in the repository
+as `disktree.ext.colors.txt`; copy or edit it as a starting point.
+
 The file is read at startup and again every time **File type colors** is
 switched on, so an edit takes effect without restarting.
 

@@ -290,7 +290,7 @@ fn paint_tiles(
     // A raised block's bevel, in rem like everything else, so it keeps its
     // relationship to the tiles at every interface-zoom step; never thinner
     // than a pixel, or it would disappear.
-    let bevel = px((window.rem_size().as_f32() * 0.0625).max(1.0));
+    let bevel = px((window.rem_size().as_f32() * 0.125).max(1.0));
     // Outlines are drawn after every fill: a directory's children paint over
     // its body, and would otherwise cover its selection ring, leaving only
     // slivers of it showing in the gaps between them.
@@ -458,13 +458,15 @@ fn paint_block(
     };
     // Only the border draws: the body is transparent, so the gradient below
     // shows through the middle. Two quads, because one quad has one border
-    // colour and a bevel needs two.
+    // colour and a bevel needs two; the edges are brighter and darker than
+    // the body, which is what makes the block read as a solid object.
+    let (highlight, shadow) = palette::cushion_edges(base);
     window.paint_quad(quad(
         bounds,
         Corners::default(),
         clear,
         lit,
-        light,
+        highlight,
         solid,
     ));
     window.paint_quad(quad(
@@ -472,7 +474,7 @@ fn paint_block(
         Corners::default(),
         clear,
         shaded,
-        dark,
+        shadow,
         solid,
     ));
 }
