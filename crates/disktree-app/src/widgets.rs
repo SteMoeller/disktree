@@ -9,7 +9,7 @@ use disktree_core::tree::{Metric, Node};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, Div, ElementId, FontWeight, Hsla, InteractiveElement as _,
-    ParentElement, SharedString, Styled, div, relative,
+    ParentElement, SharedString, Stateful, Styled, div, relative,
 };
 use gpui_omarchy::{ActiveTheme, Status};
 
@@ -247,6 +247,22 @@ pub fn hint(
                 .text_color(theme.secondary)
                 .child(label.into()),
         )
+}
+
+/// [`hint`] with a hover help that says what the keys actually do.
+///
+/// The help is a sentence, not the label again. The id is taken from the
+/// keys, which are unique within one bar, so the tooltip's anchor is stable
+/// from frame to frame; the same mechanism the depth control uses.
+pub fn hint_with_help(
+    keys: impl Into<SharedString>,
+    label: impl Into<SharedString>,
+    help: impl Into<SharedString>,
+    cx: &App,
+) -> Stateful<Div> {
+    let keys = keys.into();
+    let id = ElementId::Name(SharedString::from(format!("hint-{keys}")));
+    gpui_omarchy::with_tooltip(hint(keys, label, cx).id(id), help)
 }
 
 /// A section heading inside a panel.

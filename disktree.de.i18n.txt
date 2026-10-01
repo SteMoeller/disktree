@@ -269,3 +269,20 @@ mode=Modus
 reset=Zurücksetzen
 volumes=Laufwerke
 rescan=Neu scannen
+
+# Hover-Hilfen fuer die Kommandos im unteren Menue.
+Mark or unmark the tile under the pointer (or the selection) so it can be removed later.=Die Kachel unter dem Zeiger (oder die Auswahl) für später markieren; erneut drücken hebt die Markierung auf.
+Open the selected directory and draw what is inside it.=Das ausgewählte Verzeichnis öffnen und seinen Inhalt zeichnen.
+Go up one directory.=Eine Ebene nach oben.
+Show the list of marked paths before anything is removed.=Die Liste der markierten Pfade zeigen, bevor etwas entfernt wird.
+Move between the tiles at this level.=Zwischen den Kacheln dieser Ebene bewegen.
+Filter by name; only matches keep their colour.=Nach Namen filtern; nur Treffer behalten ihre Farbe.
+Draw fewer or more levels of the tree at once.=Weniger oder mehr Ebenen des Baums gleichzeitig zeichnen.
+Rank and colour by size, file count or age.=Nach Größe, Dateizahl oder Alter sortieren und färben.
+Reset the zoom and pan of the mosaic.=Zoom und Verschiebung des Mosaiks zurücksetzen.
+Choose another drive or volume to scan.=Ein anderes Laufwerk zum Scannen wählen.
+Scan the current directory again.=Das aktuelle Verzeichnis erneut scannen.
+Shrink the interface, the way ctrl - does.=Die Oberfläche verkleinern, so wie ctrl -.
+Enlarge the interface, the way ctrl + does.=Die Oberfläche vergrößern, so wie ctrl +.
+Switch the interface language.=Die Oberflächensprache wechseln.
+List every key.=Alle Tasten auflisten.

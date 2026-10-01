@@ -264,3 +264,20 @@ What happens=What happens
 Worth a look=Worth a look
 XDG trash=XDG trash
 Zoom toward a directory, then go into it=Zoom toward a directory, then go into it
+
+# Hover help for the commands in the bottom bar.
+Mark or unmark the tile under the pointer (or the selection) so it can be removed later.=Mark or unmark the tile under the pointer (or the selection) so it can be removed later.
+Open the selected directory and draw what is inside it.=Open the selected directory and draw what is inside it.
+Go up one directory.=Go up one directory.
+Show the list of marked paths before anything is removed.=Show the list of marked paths before anything is removed.
+Move between the tiles at this level.=Move between the tiles at this level.
+Filter by name; only matches keep their colour.=Filter by name; only matches keep their colour.
+Draw fewer or more levels of the tree at once.=Draw fewer or more levels of the tree at once.
+Rank and colour by size, file count or age.=Rank and colour by size, file count or age.
+Reset the zoom and pan of the mosaic.=Reset the zoom and pan of the mosaic.
+Choose another drive or volume to scan.=Choose another drive or volume to scan.
+Scan the current directory again.=Scan the current directory again.
+Shrink the interface, the way ctrl - does.=Shrink the interface, the way ctrl - does.
+Enlarge the interface, the way ctrl + does.=Enlarge the interface, the way ctrl + does.
+Switch the interface language.=Switch the interface language.
+List every key.=List every key.

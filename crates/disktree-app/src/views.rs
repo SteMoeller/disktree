@@ -2099,19 +2099,40 @@ fn key_bar(
     window: &Window,
     cx: &Context<'_, Disktree>,
 ) -> Div {
-    // Most useful first, so a narrow window clips the least useful.
-    let hints: [(&str, &str); 11] = [
-        ("space", "mark"),
-        ("enter", "open"),
-        ("\u{232b}", "up"),
-        ("c", "review"),
-        ("hjkl", "move"),
-        ("/", "filter"),
-        (crate::i18n::t("[ ]"), "depth"),
-        ("t", "mode"),
-        ("0", "reset"),
-        ("v", "volumes"),
-        ("r", "rescan"),
+    // Most useful first, so a narrow window clips the least useful. The
+    // third column is the hover help: keys, label, help.
+    let hints: [(&str, &str, &str); 11] = [
+        (
+            "space",
+            "mark",
+            "Mark or unmark the tile under the pointer (or the selection) so it can be removed later.",
+        ),
+        (
+            "enter",
+            "open",
+            "Open the selected directory and draw what is inside it.",
+        ),
+        ("\u{232b}", "up", "Go up one directory."),
+        (
+            "c",
+            "review",
+            "Show the list of marked paths before anything is removed.",
+        ),
+        ("hjkl", "move", "Move between the tiles at this level."),
+        (
+            "/",
+            "filter",
+            "Filter by name; only matches keep their colour.",
+        ),
+        (
+            crate::i18n::t("[ ]"),
+            "depth",
+            "Draw fewer or more levels of the tree at once.",
+        ),
+        ("t", "mode", "Rank and colour by size, file count or age."),
+        ("0", "reset", "Reset the zoom and pan of the mosaic."),
+        ("v", "volumes", "Choose another drive or volume to scan."),
+        ("r", "rescan", "Scan the current directory again."),
     ];
     let mut lane = div()
         .flex()
@@ -2121,9 +2142,16 @@ fn key_bar(
         .flex_1()
         .min_w_0()
         .overflow_hidden();
-    for (keys, label) in hints {
-        let label = crate::i18n::t(label);
-        lane = lane.child(widgets::hint(keys, label, cx).flex_shrink_0());
+    for (keys, label, help) in hints {
+        lane = lane.child(
+            widgets::hint_with_help(
+                keys,
+                crate::i18n::t(label),
+                crate::i18n::t(help),
+                cx,
+            )
+            .flex_shrink_0(),
+        );
     }
 
     let mut row = div()
@@ -2184,7 +2212,7 @@ fn key_bar(
             .items_center()
             .flex_shrink_0()
             .text_size(text::CAPTION)
-            .child(
+            .child(with_tooltip(
                 button("zoom-out", "\u{2212}", ButtonVariant::Secondary, cx)
                     .tab_stop(false)
                     .disabled(Disktree::zoom_at_limit(-1, window))
@@ -2192,14 +2220,15 @@ fn key_bar(
                         this.zoom_step(-1, window);
                         cx.notify();
                     })),
-            )
+                crate::i18n::t("Shrink the interface, the way ctrl - does."),
+            ))
             .child(
                 div()
                     .px(space::XS)
                     .text_color(theme.secondary)
                     .child(percent),
             )
-            .child(
+            .child(with_tooltip(
                 button("zoom-in", "+", ButtonVariant::Secondary, cx)
                     .tab_stop(false)
                     .disabled(Disktree::zoom_at_limit(1, window))
@@ -2207,23 +2236,33 @@ fn key_bar(
                         this.zoom_step(1, window);
                         cx.notify();
                     })),
-            )
+                crate::i18n::t("Enlarge the interface, the way ctrl + does."),
+            ))
     };
     // The interface language: click to walk the languages found at startup.
     let language = {
         let label = crate::i18n::current().to_uppercase();
-        button("language", label, ButtonVariant::Secondary, cx)
-            .tab_stop(false)
-            .disabled(crate::i18n::languages().len() < 2)
-            .on_click(cx.listener(|_, _, _, cx| {
-                crate::i18n::cycle();
-                cx.notify();
-            }))
+        with_tooltip(
+            button("language", label, ButtonVariant::Secondary, cx)
+                .tab_stop(false)
+                .disabled(crate::i18n::languages().len() < 2)
+                .on_click(cx.listener(|_, _, _, cx| {
+                    crate::i18n::cycle();
+                    cx.notify();
+                })),
+            crate::i18n::t("Switch the interface language."),
+        )
     };
     row.child(language)
         .child(zoom)
         .child(
-            widgets::hint("?", crate::i18n::t("all keys"), cx).flex_shrink_0(),
+            widgets::hint_with_help(
+                "?",
+                crate::i18n::t("all keys"),
+                crate::i18n::t("List every key."),
+                cx,
+            )
+            .flex_shrink_0(),
         )
         .child(
             div()
