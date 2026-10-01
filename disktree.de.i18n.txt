@@ -286,3 +286,4 @@ Shrink the interface, the way ctrl - does.=Die Oberfläche verkleinern, so wie c
 Enlarge the interface, the way ctrl + does.=Die Oberfläche vergrößern, so wie ctrl +.
 Switch the interface language.=Die Oberflächensprache wechseln.
 List every key.=Alle Tasten auflisten.
+copied the path: {0}=Pfad kopiert: {0}

@@ -148,7 +148,8 @@ disktree --help     # options: apparent size, follow links, skip hidden, …
   (caches, sync history, package stores, build output), independent of
   colour. Top-level directories carry a strip of their colour and a name
   band; deeper open directories a slim label row. In **Age** mode colour is
-  the last write instead, from this week to older.
+  the last write instead, from this week to older. **Right-click** a tile to
+  copy its absolute path.
 - **Panel:** the selection (its size set large, share of the scan, files,
   last write, and for a checkout what git says — changes, stashes, unpushed
   commits); *Worth a look*, the largest things that could plausibly go;

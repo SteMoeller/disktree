@@ -2501,6 +2501,31 @@ impl Disktree {
         cx.reveal_path(&path);
     }
 
+    /// Copy a tile's absolute path to the clipboard, so it can be pasted into
+    /// a shell or another program. A right click on the tile.
+    ///
+    /// The clipboard gets the real path; the notice shows it shortened. A
+    /// path that is not in the tree is left alone.
+    pub fn copy_path(&mut self, crumbs: &[usize], cx: &mut Context<'_, Self>) {
+        if self.node_at(crumbs).is_none() {
+            return;
+        }
+        let Some(path) = self.path_at(crumbs) else {
+            return;
+        };
+        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(
+            path.display().to_string(),
+        ));
+        self.notice = Some((
+            crate::i18n::tf(
+                "copied the path: {0}",
+                &[&crate::marks::display_path(&path, self.home.as_deref())],
+            ),
+            Status::Success,
+        ));
+        cx.notify();
+    }
+
     /// Every binding, in reading order of the hint bar, so the keys and the
     /// documented list cannot drift apart.
     fn dispatch_key(
@@ -2862,6 +2887,13 @@ impl Disktree {
                     self.toggle_mark(&crumbs, cx);
                 }
             }
+            // Right click: take the tile as the selection and copy its path.
+            MouseButton::Right => {
+                if let Some(crumbs) = crumbs {
+                    self.select(Some(crumbs.clone()), cx);
+                    self.copy_path(&crumbs, cx);
+                }
+            }
             // Buttons 8 and 9. gpui-pre maps them on X11, Wayland and
             // Windows; a mouse with no side buttons never sends them, and
             // then the header `<` / `>` and alt-arrows are the whole story.
@@ -2875,7 +2907,8 @@ impl Disktree {
             {
                 self.go_forward(cx);
             }
-            _ => {}
+            // Any other navigation button does nothing here.
+            MouseButton::Navigate(_) => {}
         }
     }
 

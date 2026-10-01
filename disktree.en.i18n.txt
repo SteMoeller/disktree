@@ -281,3 +281,4 @@ Shrink the interface, the way ctrl - does.=Shrink the interface, the way ctrl - 
 Enlarge the interface, the way ctrl + does.=Enlarge the interface, the way ctrl + does.
 Switch the interface language.=Switch the interface language.
 List every key.=List every key.
+copied the path: {0}=copied the path: {0}

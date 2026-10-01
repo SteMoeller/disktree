@@ -413,6 +413,79 @@ fn hovering_reports_the_tile_under_the_pointer(cx: &mut TestAppContext) {
     assert_eq!(hovered.as_deref(), Some(biggest.as_slice()));
 }
 
+/// A right click copies the tile's absolute path, takes it as the selection
+/// and says so; a right click with no tile copies nothing.
+#[gpui_kit::test]
+fn a_right_click_copies_the_tiles_absolute_path(cx: &mut TestAppContext) {
+    use gpui_kit::{Modifiers, MouseButton};
+
+    let clipboard =
+        |view: &Entity<Disktree>, cx: &mut Window| -> Option<String> {
+            view.read_with(cx, |_app, app| {
+                app.read_from_clipboard().and_then(|item| item.text())
+            })
+        };
+
+    cx.update(gpui_omarchy::init);
+    let temp = fixture();
+    let (view, cx) = view_over(temp.path(), cx);
+    draw(cx);
+
+    // A path that is not in the tree copies nothing at all.
+    update(&view, cx, |app, cx| app.copy_path(&[usize::MAX], cx));
+    assert!(clipboard(&view, cx).is_none(), "nothing to copy");
+
+    // The deepest tile, so the pointer is over exactly one tile, as the hover
+    // test does.
+    let (crumbs, expected, point) = update(&view, cx, |app, _| {
+        let crumbs = app
+            .layout()
+            .and_then(|tiles| {
+                tiles
+                    .iter()
+                    .filter(|tile| {
+                        let crumbs = tile.crumbs();
+                        !tiles.iter().any(|other| {
+                            other.crumbs().len() > crumbs.len()
+                                && other.crumbs().starts_with(crumbs)
+                        })
+                    })
+                    .max_by(|left, right| {
+                        left.rect.area().total_cmp(&right.rect.area())
+                    })
+                    .map(|tile| tile.crumbs().to_vec())
+            })
+            .expect("a tile");
+        let path = app.path_at(&crumbs).expect("a path");
+        let rect = app.tile_rect(&crumbs).expect("a rectangle");
+        let screen = app.view.project(rect);
+        let origin = app.treemap_origin.get();
+        (
+            crumbs,
+            path.display().to_string(),
+            Point::new(
+                origin.x + px(screen.x + screen.w / 2.0),
+                origin.y + px(screen.y + screen.h / 2.0),
+            ),
+        )
+    });
+
+    cx.simulate_mouse_down(point, MouseButton::Right, Modifiers::none());
+    cx.simulate_mouse_up(point, MouseButton::Right, Modifiers::none());
+    draw(cx);
+
+    assert_eq!(
+        clipboard(&view, cx).as_deref(),
+        Some(expected.as_str()),
+        "the right click copied the tile's absolute path"
+    );
+    let (selected, noticed) = read(&view, cx, |app| {
+        (app.selected.clone(), app.notice.is_some())
+    });
+    assert_eq!(selected.as_deref(), Some(crumbs.as_slice()));
+    assert!(noticed, "the copy is confirmed in the notice line");
+}
+
 #[gpui_kit::test]
 fn typing_filters_live_and_enter_shows_only_the_matches(
     cx: &mut TestAppContext,
