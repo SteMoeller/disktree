@@ -87,6 +87,7 @@ else
 install: build
 	install -d $(BINDIR) $(APPDIR) $(ICONDIR)
 	install -m755 $(TARGET) $(BINDIR)/disktree
+	install -m644 disktree.*.i18n.txt $(BINDIR)/
 	install -m644 $(ICON) $(ICONDIR)/disktree.svg
 	VERSION=$$(sed -n 's/^version = "\(.*\)"/\1/p' $(MANIFEST) | head -1) && \
 	sed -e 's|@BINDIR@|$(BINDIR)|' -e "s|@VERSION@|$$VERSION|" \
@@ -107,7 +108,7 @@ install: build
 	    echo; echo "note: $(BINDIR) is not on PATH in this shell";; esac
 
 uninstall:
-	rm -f $(BINDIR)/disktree $(APPDIR)/disktree.desktop $(ICONDIR)/disktree.svg
+	rm -f $(BINDIR)/disktree $(APPDIR)/disktree.desktop $(ICONDIR)/disktree.svg $(BINDIR)/disktree.*.i18n.txt
 	@if command -v update-desktop-database >/dev/null 2>&1; then \
 	    update-desktop-database $(APPDIR) 2>/dev/null || true; \
 	fi

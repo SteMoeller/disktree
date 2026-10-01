@@ -406,6 +406,11 @@ pub struct Disktree {
     pub crumb_menu: Option<CrumbMenu>,
 
     pub color_mode: ColorMode,
+    /// Draw tiles as raised blocks ([`treemap_view`]'s 3D look).
+    pub blocks_3d: bool,
+    /// Colour files by their extension, read from `disktree.ext.colors.txt`.
+    /// The legend and the strip follow it too.
+    pub ext_colors: bool,
     /// The largest things worth clearing, recomputed when a scan lands.
     pub insights: Vec<Candidate>,
     /// What git knows about each checkout that has been selected; `None`
@@ -518,6 +523,8 @@ impl Disktree {
             focus: cx.focus_handle(),
             crumb_menu: None,
             color_mode: ColorMode::Kind,
+            blocks_3d: false,
+            ext_colors: false,
             insights: Vec::new(),
             git: FxHashMap::default(),
             git_pending: FxHashSet::default(),
@@ -657,7 +664,10 @@ impl Disktree {
                     space: space_info(&root).ok(),
                 });
             }
-            volumes.retain(|volume| volume.point != root_path);
+            // Every volume stays listed, the scanned one included: with the
+            // current volume removed, a two-drive machine was left with a
+            // one-row picker after the first choice, with nothing for the
+            // arrows to move to.
             volumes
         });
         cx.spawn(async move |this, cx| {
@@ -1577,10 +1587,12 @@ impl Disktree {
             && let Some(ancestor) = self.marked_ancestor(&target.path)
         {
             self.notice = Some((
-                format!(
-                    "{} goes with the marked {}; unmark that to keep it",
-                    display_path(&target.path, self.home.as_deref()),
-                    display_path(&ancestor, self.home.as_deref())
+                crate::i18n::tf(
+                    "{0} goes with the marked {1}; unmark that to keep it",
+                    &[
+                        &display_path(&target.path, self.home.as_deref()),
+                        &display_path(&ancestor, self.home.as_deref()),
+                    ],
                 ),
                 Status::Warning,
             ));
@@ -1604,11 +1616,13 @@ impl Disktree {
             }
             if !inside.is_empty() {
                 self.notice = Some((
-                    format!(
-                        "{} now covers {} mark{} inside it",
-                        display_path(&path, self.home.as_deref()),
-                        inside.len(),
-                        if inside.len() == 1 { "" } else { "s" }
+                    crate::i18n::tf(
+                        "{0} now covers {1} mark{2} inside it",
+                        &[
+                            &display_path(&path, self.home.as_deref()),
+                            &inside.len(),
+                            &if inside.len() == 1 { "" } else { "s" },
+                        ],
                     ),
                     Status::Neutral,
                 ));
@@ -1686,6 +1700,9 @@ impl Disktree {
         // Hue comes from the node's kind; lightness from its depth in this
         // view, so the first level always reads as the first level.
         let age = self.color_mode == ColorMode::Age;
+        // Configured file-type colours replace the category hue when on,
+        // except in age mode, where the ramp is the whole message.
+        let ext_colors = self.ext_colors && !age;
         let now = self.scanned_at;
         let mut decorations = Vec::with_capacity(tiles.len());
         let mut labels = Vec::new();
@@ -1696,6 +1713,21 @@ impl Disktree {
                 TileKind::Others { .. } => None,
             };
             let category = node.map_or_else(Default::default, |n| n.category);
+            // A file by its own extension, a directory by the extension it
+            // holds the most bytes of.
+            let ext_color = (ext_colors && node.is_some())
+                .then(|| {
+                    node.and_then(|n| {
+                        if n.is_dir() {
+                            disktree_core::classify::dominant_extension(n)
+                        } else {
+                            disktree_core::classify::file_extension(&n.name)
+                                .map(std::borrow::Cow::into_owned)
+                        }
+                    })
+                    .and_then(|extension| crate::ext_colors::color(&extension))
+                })
+                .flatten();
             let age_bucket = (age && node.is_some_and(|n| n.modified > 0))
                 .then(|| {
                     let days =
@@ -1718,6 +1750,7 @@ impl Disktree {
                 rect: self.animated_rect(tile.rect),
                 depth: tile.depth,
                 category,
+                ext_color,
                 age_bucket,
                 reclaimable: node.is_some_and(|n| n.reclaim.is_some()),
                 filtered,
@@ -1758,7 +1791,7 @@ impl Disktree {
                     });
                 }
                 TileKind::Others { count, .. } => labels.push(Label {
-                    text: format!("+{count} more"),
+                    text: crate::i18n::tf("+{0} more", &[&count]),
                     rect: self.animated_rect(tile.rect),
                     header: None,
                     depth: tile.depth,
@@ -1780,6 +1813,7 @@ impl Disktree {
             tiles: decorations,
             labels,
             view,
+            blocks_3d: self.blocks_3d,
         }
     }
 
@@ -1990,6 +2024,24 @@ impl Disktree {
         }
     }
 
+    /// The *3D blocks* toggle: raised tiles instead of flat fills.
+    pub fn set_blocks_3d(&mut self, on: bool, cx: &mut Context<'_, Self>) {
+        self.blocks_3d = on;
+        cx.notify();
+    }
+
+    /// The *File type colors* toggle.
+    ///
+    /// Turning it on reads `disktree.ext.colors.txt` again, so an edit takes
+    /// effect without a restart; turning it off leaves what is loaded alone.
+    pub fn set_ext_colors(&mut self, on: bool, cx: &mut Context<'_, Self>) {
+        self.ext_colors = on;
+        if on {
+            crate::ext_colors::reload();
+        }
+        cx.notify();
+    }
+
     // ── removal ─────────────────────────────────────────────────────────
 
     /// The review screen's commit: move to the trash at once, or ask first for
@@ -2049,20 +2101,57 @@ impl Disktree {
             return false;
         }
         let steps = crate::ui::ZOOM_STEPS;
-        let current = window.rem_size().as_f32() / crate::ui::BASE_REM;
-        let index = steps
-            .iter()
-            .position(|step| (step - current).abs() < 0.01)
-            .unwrap_or(2);
+        let index = Self::zoom_index(window);
         let next = match keystroke.key.as_str() {
             "=" | "+" => (index + 1).min(steps.len() - 1),
             "-" => index.saturating_sub(1),
-            "0" => 2,
+            "0" => crate::ui::ZOOM_DEFAULT,
             _ => return false,
         };
-        window.set_rem_size(px(crate::ui::BASE_REM * steps[next]));
-        self.cache = None;
+        self.set_zoom_index(next, window);
         true
+    }
+
+    /// One interface-zoom step, for the + and − control in the bottom bar.
+    /// `delta` above zero is larger, below zero smaller; the ends are held.
+    pub fn zoom_step(&mut self, delta: i32, window: &mut Window) {
+        let steps = crate::ui::ZOOM_STEPS;
+        let index = Self::zoom_index(window);
+        let next = if delta >= 0 {
+            (index + 1).min(steps.len() - 1)
+        } else {
+            index.saturating_sub(1)
+        };
+        self.set_zoom_index(next, window);
+    }
+
+    /// Whether the interface is already at the smallest or largest step, so
+    /// the + and − control can grey out the end it cannot go past.
+    pub fn zoom_at_limit(delta: i32, window: &Window) -> bool {
+        let steps = crate::ui::ZOOM_STEPS;
+        let index = Self::zoom_index(window);
+        if delta >= 0 {
+            index >= steps.len() - 1
+        } else {
+            index == 0
+        }
+    }
+
+    /// Which [`crate::ui::ZOOM_STEPS`] entry the window's current rem is.
+    fn zoom_index(window: &Window) -> usize {
+        let steps = crate::ui::ZOOM_STEPS;
+        let current = window.rem_size().as_f32() / crate::ui::BASE_REM;
+        steps
+            .iter()
+            .position(|step| (step - current).abs() < 0.01)
+            .unwrap_or(crate::ui::ZOOM_DEFAULT)
+    }
+
+    /// Set the window's rem to a zoom step and drop the laid-out cache.
+    fn set_zoom_index(&mut self, index: usize, window: &mut Window) {
+        let steps = crate::ui::ZOOM_STEPS;
+        window.set_rem_size(px(crate::ui::BASE_REM * steps[index]));
+        self.cache = None;
     }
 
     pub fn begin_removal(&mut self, cx: &mut Context<'_, Self>) {
@@ -2224,7 +2313,7 @@ impl Disktree {
         };
         if matches.count == 0 {
             self.notice = Some((
-                format!("nothing here matches {}", matches.needle),
+                crate::i18n::tf("nothing here matches {0}", &[&matches.needle]),
                 Status::Warning,
             ));
             cx.notify();
@@ -2334,15 +2423,21 @@ impl Disktree {
             };
             let notice = match std::fs::write(&path, list) {
                 Ok(()) => (
-                    format!(
-                        "saved {count} {} to {}",
-                        if count == 1 { "path" } else { "paths" },
-                        path.display()
+                    crate::i18n::tf(
+                        "saved {0} {1} to {2}",
+                        &[
+                            &count,
+                            &if count == 1 { "path" } else { "paths" },
+                            &path.display(),
+                        ],
                     ),
                     Status::Success,
                 ),
                 Err(error) => (
-                    format!("could not save {}: {error}", path.display()),
+                    crate::i18n::tf(
+                        "could not save {0}: {1}",
+                        &[&path.display(), &error],
+                    ),
                     Status::Error,
                 ),
             };
@@ -2371,10 +2466,13 @@ impl Disktree {
         cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(prompt));
         let count = plan.targets.len();
         self.notice = Some((
-            format!(
-                "copied a prompt for your agent: {count} {}, {}",
-                if count == 1 { "path" } else { "paths" },
-                disktree_core::size::human_bytes(plan.bytes())
+            crate::i18n::tf(
+                "copied a prompt for your agent: {0} {1}, {2}",
+                &[
+                    &count,
+                    &if count == 1 { "path" } else { "paths" },
+                    &disktree_core::size::human_bytes(plan.bytes()),
+                ],
             ),
             Status::Success,
         ));
@@ -2391,9 +2489,9 @@ impl Disktree {
         // GPUI's reveal cannot report failure, so check what it can't.
         if std::fs::symlink_metadata(&path).is_err() {
             self.notice = Some((
-                format!(
-                    "{} is no longer on disk",
-                    crate::marks::display_path(&path, self.home.as_deref())
+                crate::i18n::tf(
+                    "{0} is no longer on disk",
+                    &[&crate::marks::display_path(&path, self.home.as_deref())],
                 ),
                 Status::Warning,
             ));
@@ -2414,6 +2512,14 @@ impl Disktree {
         let control = event.keystroke.modifiers.control;
         let shift = event.keystroke.modifiers.shift;
         let alt = event.keystroke.modifiers.alt;
+
+        // Alt+L cycles the interface language. Plain `l` stays "move right /
+        // open", which the treemap owns.
+        if alt && key == "l" {
+            crate::i18n::cycle();
+            cx.notify();
+            return;
+        }
 
         // The alert dialog owns Enter and Escape while it is open; a key that
         // bubbles up to here must not also act on the screen behind it.
@@ -2949,7 +3055,10 @@ impl Disktree {
                 Err(error) => {
                     this.restarting = false;
                     this.notice = Some((
-                        format!("still not an administrator: {error}"),
+                        crate::i18n::tf(
+                            "still not an administrator: {0}",
+                            &[&error],
+                        ),
                         Status::Warning,
                     ));
                     cx.notify();
@@ -3041,12 +3150,12 @@ impl Render for Disktree {
         self.tick_transition(window);
         // The titlebar names the directory on screen, however it got there:
         // a key, a click, a rescan or a folder chosen from the menu.
-        let title = format!(
-            "disktree · {}",
-            crate::marks::display_path(
+        let title = crate::i18n::tf(
+            "disktree · {0}",
+            &[&crate::marks::display_path(
                 &self.current_path(),
-                self.home.as_deref()
-            )
+                self.home.as_deref(),
+            )],
         );
         if title != self.window_title {
             window.set_window_title(&title);

@@ -32,19 +32,21 @@ impl GitState {
     pub fn summary(&self) -> String {
         let mut parts = Vec::new();
         parts.push(match self.changed {
-            Some(0) => "clean".to_string(),
-            Some(count) => format!("{count} changed"),
-            None => "changes unknown".to_string(),
+            Some(0) => crate::i18n::t("clean").to_string(),
+            Some(count) => crate::i18n::tf("{0} changed", &[&count]),
+            None => crate::i18n::t("changes unknown").to_string(),
         });
         parts.push(match self.stashes {
-            0 => "no stash".to_string(),
-            1 => "1 stash".to_string(),
-            count => format!("{count} stashes"),
+            0 => crate::i18n::t("no stash").to_string(),
+            1 => crate::i18n::t("1 stash").to_string(),
+            count => crate::i18n::tf("{0} stashes", &[&count]),
         });
         match self.unpushed {
             Some(0) => {}
-            Some(count) => parts.push(format!("{count} unpushed")),
-            None => parts.push("no upstream".to_string()),
+            Some(count) => {
+                parts.push(crate::i18n::tf("{0} unpushed", &[&count]));
+            }
+            None => parts.push(crate::i18n::t("no upstream").to_string()),
         }
         parts.join(", ")
     }
@@ -271,7 +273,7 @@ mod tests {
         let hook = dir.path().join("hook.sh");
         std::fs::write(
             &hook,
-            format!("#!/bin/sh\ntouch '{}'\n", marker.display()),
+            crate::i18n::tf("#!/bin/sh\ntouch '{0}'\n", &[&marker.display()]),
         )
         .expect("write hook");
         std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755))
@@ -305,7 +307,10 @@ mod tests {
         let gpg = dir.path().join("gpg.sh");
         std::fs::write(
             &gpg,
-            format!("#!/bin/sh\ntouch '{}'\nexit 1\n", marker.display()),
+            crate::i18n::tf(
+                "#!/bin/sh\ntouch '{0}'\nexit 1\n",
+                &[&marker.display()],
+            ),
         )
         .expect("write gpg");
         std::fs::set_permissions(&gpg, std::fs::Permissions::from_mode(0o755))
@@ -332,10 +337,9 @@ mod tests {
             return; // no git on this machine
         }
         let tree = git(&["mktree"], None).expect("empty tree");
-        let commit = format!(
-            "tree {tree}\nauthor t <t@t> 0 +0000\ncommitter t <t@t> 0 +0000\n\
-             gpgsig -----BEGIN PGP SIGNATURE-----\n \n \
-             -----END PGP SIGNATURE-----\n\nstash\n"
+        let commit = crate::i18n::tf(
+            "tree {0}\nauthor t <t@t> 0 +0000\ncommitter t <t@t> 0 +0000\ngpgsig -----BEGIN PGP SIGNATURE-----\n \n -----END PGP SIGNATURE-----\n\nstash\n",
+            &[&tree],
         );
         let id = git(
             &["hash-object", "-t", "commit", "-w", "--stdin"],
@@ -366,7 +370,10 @@ mod tests {
         // A clean filter reads the file on stdin and writes it back.
         std::fs::write(
             &filter,
-            format!("#!/bin/sh\ntouch '{}'\ncat\n", marker.display()),
+            crate::i18n::tf(
+                "#!/bin/sh\ntouch '{0}'\ncat\n",
+                &[&marker.display()],
+            ),
         )
         .expect("write filter");
         std::fs::set_permissions(

@@ -96,8 +96,15 @@ pub mod size {
     pub const KEY_LANE: Rems = Rems(7.0);
 }
 
-/// Interface zoom steps, as a factor of the 16 px default rem.
-pub const ZOOM_STEPS: [f32; 7] = [0.75, 0.875, 1.0, 1.125, 1.25, 1.5, 1.75];
+/// Interface zoom steps, as a factor of the 16 px default rem. Five percent
+/// apart, so 125 % and 150 % are no longer neighbours.
+pub const ZOOM_STEPS: [f32; 21] = [
+    0.75, 0.80, 0.85, 0.90, 0.95, 1.00, 1.05, 1.10, 1.15, 1.20, 1.25, 1.30,
+    1.35, 1.40, 1.45, 1.50, 1.55, 1.60, 1.65, 1.70, 1.75,
+];
+
+/// The index of the 100 % step in [`ZOOM_STEPS`], used by the `0` reset.
+pub const ZOOM_DEFAULT: usize = 5;
 
 /// The default rem, in pixels.
 pub const BASE_REM: f32 = 16.0;

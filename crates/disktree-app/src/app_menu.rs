@@ -91,26 +91,29 @@ pub fn install(cx: &mut App) {
         KeyBinding::new("cmd-]", GoForward, None),
     ]);
     cx.set_menus([
-        Menu::new("disktree").items([
-            MenuItem::os_submenu("Services", SystemMenuType::Services),
+        Menu::new(crate::i18n::t("disktree")).items([
+            MenuItem::os_submenu(
+                crate::i18n::t("Services"),
+                SystemMenuType::Services,
+            ),
             MenuItem::separator(),
-            MenuItem::action("Hide disktree", Hide),
-            MenuItem::action("Hide Others", HideOthers),
-            MenuItem::action("Show All", ShowAll),
+            MenuItem::action(crate::i18n::t("Hide disktree"), Hide),
+            MenuItem::action(crate::i18n::t("Hide Others"), HideOthers),
+            MenuItem::action(crate::i18n::t("Show All"), ShowAll),
             MenuItem::separator(),
-            MenuItem::action("Quit disktree", Quit),
+            MenuItem::action(crate::i18n::t("Quit disktree"), Quit),
         ]),
-        Menu::new("File").items([
-            MenuItem::action("Open Folder\u{2026}", OpenFolder),
-            MenuItem::action("Show in Finder", ShowInFinder),
+        Menu::new(crate::i18n::t("File")).items([
+            MenuItem::action(crate::i18n::t("Open Folder\u{2026}"), OpenFolder),
+            MenuItem::action(crate::i18n::t("Show in Finder"), ShowInFinder),
             MenuItem::separator(),
-            MenuItem::action("Rescan", Rescan),
+            MenuItem::action(crate::i18n::t("Rescan"), Rescan),
             MenuItem::separator(),
-            MenuItem::action("Close Window", CloseWindow),
+            MenuItem::action(crate::i18n::t("Close Window"), CloseWindow),
         ]),
-        Menu::new("Go").items([
-            MenuItem::action("Back", GoBack),
-            MenuItem::action("Forward", GoForward),
+        Menu::new(crate::i18n::t("Go")).items([
+            MenuItem::action(crate::i18n::t("Back"), GoBack),
+            MenuItem::action(crate::i18n::t("Forward"), GoForward),
         ]),
     ]);
 }

@@ -13,7 +13,9 @@
 
 mod app_menu;
 mod appearance;
+mod ext_colors;
 mod git;
+mod i18n;
 mod marks;
 mod palette;
 mod state;
@@ -79,6 +81,10 @@ fn main() -> Result<()> {
 }
 
 fn run() -> Result<()> {
+    // The interface language comes from files found at startup; see `i18n`.
+    i18n::load();
+    // File-type colours, likewise; see `ext_colors`.
+    ext_colors::load();
     let args = parse_args(std::env::args_os().skip(1))?;
 
     // When the app executable is reached through the command-line symlink,

@@ -35,9 +35,9 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_ID_EXTD_DIR_INFO, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES,
     FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
     FileIdExtdDirectoryInfo, FindFirstVolumeW, FindNextVolumeW,
-    FindVolumeClose, GetDiskFreeSpaceExW, GetFileInformationByHandleEx,
-    GetVolumeInformationW, GetVolumePathNameW,
-    GetVolumePathNamesForVolumeNameW, SYNCHRONIZE,
+    FindVolumeClose, GetDiskFreeSpaceExW, GetDriveTypeW,
+    GetFileInformationByHandleEx, GetLogicalDrives, GetVolumeInformationW,
+    GetVolumePathNameW, GetVolumePathNamesForVolumeNameW, SYNCHRONIZE,
 };
 
 use crate::space::SpaceInfo;
@@ -557,6 +557,38 @@ pub fn mount_points() -> Vec<PathBuf> {
     }
     // SAFETY: `find` is a live search handle, closed once.
     unsafe { FindVolumeClose(find) };
+    points
+}
+
+/// A drive the desktop maps to a share, and removable media, as
+/// `GetDriveTypeW` reports them. The `DRIVE_*` names live in
+/// `Win32::System::WindowsProgramming`, whose feature this crate does not
+/// enable, so the two values are written here.
+const DRIVE_REMOVABLE: u32 = 2;
+const DRIVE_REMOTE: u32 = 4;
+
+/// Mapped network drives and removable media, as drive roots such as `Z:\`.
+///
+/// The volume enumeration above only sees volumes Windows has a GUID for,
+/// which a share mapped to a letter does not have; these are the letters.
+/// A dead share answers slowly, which is why the picker probes on a
+/// background thread.
+pub fn network_drives() -> Vec<PathBuf> {
+    let mut points = Vec::new();
+    // SAFETY: takes no arguments and returns a bitmask of drives.
+    let drives = unsafe { GetLogicalDrives() };
+    for index in 0..26_u32 {
+        if drives & (1 << index) == 0 {
+            continue;
+        }
+        let letter = u16::from(b'A') + u16::try_from(index).unwrap_or(0);
+        let root = [letter, u16::from(b':'), u16::from(b'\\'), 0];
+        // SAFETY: `root` is a NUL-terminated drive root.
+        let kind = unsafe { GetDriveTypeW(root.as_ptr()) };
+        if kind == DRIVE_REMOTE || kind == DRIVE_REMOVABLE {
+            points.push(PathBuf::from(OsString::from_wide(&root[..3])));
+        }
+    }
     points
 }
 

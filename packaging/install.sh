@@ -17,6 +17,11 @@ VERSION=$(cat "$here/VERSION")
 
 install -d "$BINDIR" "$APPDIR" "$ICONDIR"
 install -m755 "$here/disktree" "$BINDIR/disktree"
+# The languages live beside the binary; that is where it looks first.
+for file in "$here"/disktree.*.i18n.txt; do
+    [ -e "$file" ] || continue
+    install -m644 "$file" "$BINDIR/"
+done
 install -m644 "$here/disktree.svg" "$ICONDIR/disktree.svg"
 sed -e "s|@BINDIR@|$BINDIR|" -e "s|@VERSION@|$VERSION|" \
     "$here/disktree.desktop.in" > "$APPDIR/disktree.desktop"

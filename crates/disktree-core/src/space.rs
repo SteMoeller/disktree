@@ -674,16 +674,31 @@ pub fn volumes() -> Vec<Volume> {
 /// since there is nothing to measure there.
 #[cfg(windows)]
 pub fn volumes() -> Vec<Volume> {
-    let mut volumes: Vec<Volume> = crate::windows::mount_points()
-        .into_iter()
-        .filter_map(|point| {
-            space_info(&point).ok().map(|space| Volume {
+    let mut points = crate::windows::mount_points();
+    // Mapped shares and removable media have no volume GUID, so they are
+    // found by drive letter instead.
+    points.extend(crate::windows::network_drives());
+    let mut volumes: Vec<Volume> = Vec::new();
+    for point in points {
+        // A removable disk appears in both lists; keep it once. Drive letters
+        // compare without regard to case, as Windows compares them.
+        let seen = volumes.iter().any(|volume| {
+            volume
+                .point
+                .to_string_lossy()
+                .eq_ignore_ascii_case(&point.to_string_lossy())
+        });
+        if seen {
+            continue;
+        }
+        if let Ok(space) = space_info(&point) {
+            volumes.push(Volume {
                 point,
                 device: None,
                 space: Some(space),
-            })
-        })
-        .collect();
+            });
+        }
+    }
     sort_by_free_space(&mut volumes);
     volumes
 }

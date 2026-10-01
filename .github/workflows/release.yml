@@ -104,7 +104,7 @@ jobs:
           cp target/release/disktree "dist/$name/"
           strip "dist/$name/disktree"
           cp packaging/install.sh packaging/disktree.desktop.in \
-             assets/disktree.svg README.md LICENSE "dist/$name/"
+             assets/disktree.svg README.md LICENSE disktree.*.i18n.txt "dist/$name/"
           echo "$VERSION" > "dist/$name/VERSION"
           tar -C dist -czf "dist/$name.tar.gz" "$name"
           (cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")

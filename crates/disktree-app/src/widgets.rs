@@ -159,17 +159,18 @@ pub fn space_meter(space: SpaceInfo, reclaiming: u64, cx: &App) -> Div {
     let gained = gained.clamp(0.0, used_now);
 
     let label = if reclaiming > 0 {
-        format!(
-            "{} free · {} after removing {}",
-            human_bytes(space.available),
-            human_bytes(projected.available),
-            human_bytes(reclaiming)
+        crate::i18n::tf(
+            "{0} free · {1} after removing {2}",
+            &[
+                &human_bytes(space.available),
+                &human_bytes(projected.available),
+                &human_bytes(reclaiming),
+            ],
         )
     } else {
-        format!(
-            "{} free of {}",
-            human_bytes(space.available),
-            human_bytes(space.total)
+        crate::i18n::tf(
+            "{0} free of {1}",
+            &[&human_bytes(space.available), &human_bytes(space.total)],
         )
     };
 
@@ -384,22 +385,24 @@ pub fn split_size(text: &str) -> (String, String) {
 /// How long ago a Unix time was, in the unit a person would use.
 pub fn ago(now: i64, then: i64) -> String {
     if then <= 0 {
-        return "unknown".to_string();
+        return crate::i18n::t("unknown").to_string();
     }
     let seconds = (now - then).max(0);
     let plural = |count: i64, unit: &str| {
         if count == 1 {
-            format!("1 {unit} ago")
+            crate::i18n::tf("1 {0} ago", &[&unit])
         } else {
-            format!("{count} {unit}s ago")
+            crate::i18n::tf("{0} {1}s ago", &[&count, &unit])
         }
     };
     match seconds {
-        0..60 => "just now".to_string(),
-        60..3_600 => plural(seconds / 60, "minute"),
+        0..60 => crate::i18n::t("just now").to_string(),
+        60..3_600 => plural(seconds / 60, crate::i18n::t("minute")),
         3_600..86_400 => plural(seconds / 3_600, "hour"),
-        86_400..5_184_000 => plural(seconds / 86_400, "day"),
-        5_184_000..63_072_000 => plural(seconds / 2_592_000, "month"),
+        86_400..5_184_000 => plural(seconds / 86_400, crate::i18n::t("day")),
+        5_184_000..63_072_000 => {
+            plural(seconds / 2_592_000, crate::i18n::t("month"))
+        }
         _ => plural(seconds / 31_536_000, "year"),
     }
 }
