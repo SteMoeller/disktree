@@ -27,6 +27,7 @@ mod views;
 mod widgets;
 
 use std::path::PathBuf;
+use std::rc::Rc;
 #[cfg(target_os = "macos")]
 use std::{
     io::IsTerminal as _,
@@ -36,7 +37,7 @@ use std::{
 
 use anyhow::{Context as _, Result};
 use disktree_core::scan::ScanOptions;
-use gpui_kit::{AppContext as _, WindowOptions, px, size};
+use gpui_kit::{AppContext as _, PlatformDisplay, WindowOptions, px, size};
 use state::Disktree;
 
 /// What the command line asked for.
@@ -126,14 +127,24 @@ fn run() -> Result<()> {
             }
             let options = args.options.clone();
             let root_for_app = root.clone();
+            // Open centred in the work area of the monitor the app was
+            // started on, rather than at a fixed global point that only ever
+            // lands on the primary monitor.
+            let wanted = size(px(1440.), px(900.));
+            let work = start_display(cx).map_or_else(
+                || {
+                    gpui_kit::Bounds::new(
+                        gpui_kit::point(px(0.), px(0.)),
+                        wanted,
+                    )
+                },
+                |display| display.visible_bounds(),
+            );
             let window = cx
                 .open_window(
                     WindowOptions {
                         window_bounds: Some(gpui_kit::WindowBounds::Windowed(
-                            gpui_kit::Bounds::new(
-                                gpui_kit::point(px(120.), px(90.)),
-                                size(px(1440.), px(900.)),
-                            ),
+                            centered_in(work, wanted),
                         )),
                         titlebar: Some(gpui_kit::TitlebarOptions {
                             title: Some(
@@ -184,6 +195,74 @@ fn run() -> Result<()> {
             cx.activate(true);
         });
     Ok(())
+}
+
+/// Where to place a window of `wanted` size so it sits centred in `work`, a
+/// monitor's work area: the screen minus its taskbar, dock or menu bar.
+///
+/// Shrunk to the work area when the window would not fit, so it is never put
+/// partly off the monitor; the window's own minimum size still applies on top
+/// of that. The area's offset is kept, so a monitor to the right of or below
+/// the primary centres on its own origin.
+fn centered_in(
+    work: gpui_kit::Bounds<gpui_kit::Pixels>,
+    wanted: gpui_kit::Size<gpui_kit::Pixels>,
+) -> gpui_kit::Bounds<gpui_kit::Pixels> {
+    let width = if wanted.width < work.size.width {
+        wanted.width
+    } else {
+        work.size.width
+    };
+    let height = if wanted.height < work.size.height {
+        wanted.height
+    } else {
+        work.size.height
+    };
+    gpui_kit::Bounds::new(
+        gpui_kit::point(
+            work.origin.x + (work.size.width - width) * 0.5,
+            work.origin.y + (work.size.height - height) * 0.5,
+        ),
+        size(width, height),
+    )
+}
+
+/// The monitor the app was started on: the one under the pointer, so the
+/// window opens where the user is; the primary monitor when the platform
+/// cannot say.
+#[cfg(not(windows))]
+fn start_display(cx: &gpui_kit::App) -> Option<Rc<dyn PlatformDisplay>> {
+    cx.primary_display()
+}
+
+/// Windows: the cursor's monitor through Win32, matched to a GPUI display.
+/// A `DisplayId` holds the platform's `HMONITOR` there, which is exactly
+/// what `MonitorFromPoint` returns.
+#[cfg(windows)]
+#[allow(
+    unsafe_code,
+    reason = "two Win32 calls: one fills a point, one reads it"
+)]
+fn start_display(cx: &gpui_kit::App) -> Option<Rc<dyn PlatformDisplay>> {
+    use gpui_kit::DisplayId;
+    use windows_sys::Win32::Foundation::POINT;
+    use windows_sys::Win32::Graphics::Gdi::{
+        MONITOR_DEFAULTTONEAREST, MonitorFromPoint,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
+    let mut cursor = POINT { x: 0, y: 0 };
+    // SAFETY: `cursor` is ours and the call only writes into it.
+    if unsafe { GetCursorPos(&raw mut cursor) } == 0 {
+        return cx.primary_display();
+    }
+    // SAFETY: takes the point by value and returns an opaque handle.
+    let monitor = unsafe { MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST) };
+    if monitor.is_null() {
+        return cx.primary_display();
+    }
+    cx.find_display(DisplayId::new(monitor as u64))
+        .or_else(|| cx.primary_display())
 }
 
 /// Read the command line, program name already skipped.

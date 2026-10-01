@@ -1629,6 +1629,38 @@ fn mouse_side_buttons_go_back_and_forward(cx: &mut TestAppContext) {
     assert_eq!(read(&view, cx, |app| app.screen), Screen::Review);
 }
 
+/// A window of the wanted size is centred in a monitor's work area, kept
+/// inside it when it is too big, and placed by the area's own offset.
+#[test]
+fn a_window_is_centred_in_the_monitors_work_area() {
+    use gpui_kit::{Bounds, point, size};
+
+    // A second monitor to the right, with a taskbar cut off the bottom.
+    let work =
+        Bounds::new(point(px(1920.), px(0.)), size(px(1920.), px(1040.)));
+    let placed = crate::centered_in(work, size(px(1440.), px(900.)));
+    assert_eq!(placed.size, size(px(1440.), px(900.)));
+    assert_eq!(placed.origin, point(px(2160.), px(70.)));
+
+    // A monitor already at a negative origin centres on its own centre.
+    let left =
+        Bounds::new(point(px(-1920.), px(0.)), size(px(1920.), px(1080.)));
+    let placed = crate::centered_in(left, size(px(1440.), px(900.)));
+    assert_eq!(placed.origin, point(px(-1680.), px(90.)));
+
+    // Smaller than the window: the window shrinks to the area and sits at
+    // its origin, so it is never partly off the monitor.
+    let small = Bounds::new(point(px(0.), px(0.)), size(px(1000.), px(700.)));
+    let placed = crate::centered_in(small, size(px(1440.), px(900.)));
+    assert_eq!(placed.size, size(px(1000.), px(700.)));
+    assert_eq!(placed.origin, point(px(0.), px(0.)));
+
+    // A single 1440x900 monitor still centres, rather than using (120, 90).
+    let exact = Bounds::new(point(px(0.), px(0.)), size(px(1440.), px(900.)));
+    let placed = crate::centered_in(exact, size(px(1440.), px(900.)));
+    assert_eq!(placed.origin, point(px(0.), px(0.)));
+}
+
 /// The restart as administrator reopens the same root and options: every
 /// flag it writes is one the command line reads back.
 #[test]
