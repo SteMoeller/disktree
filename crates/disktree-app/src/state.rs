@@ -1711,7 +1711,7 @@ impl Disktree {
         let now = self.scanned_at;
         let mut decorations = Vec::with_capacity(tiles.len());
         let mut labels = Vec::new();
-        for tile in &tiles {
+        for (tile_index, tile) in tiles.iter().enumerate() {
             let crumbs = tile.crumbs();
             let node = match &tile.kind {
                 TileKind::Node { crumbs } => self.node_at(crumbs),
@@ -1793,6 +1793,7 @@ impl Disktree {
                         dim: filtered == Filtered::Out,
                         marked: is_marked || is_covered,
                         size_text: crate::widgets::short_value(node, metric),
+                        tile: tile_index,
                     });
                 }
                 TileKind::Others { count, .. } => labels.push(Label {
@@ -1803,6 +1804,7 @@ impl Disktree {
                     dim: self.matches.is_some(),
                     marked: false,
                     size_text: String::new(),
+                    tile: tile_index,
                 }),
             }
         }
@@ -3096,6 +3098,9 @@ pub struct Label {
     pub dim: bool,
     pub marked: bool,
     pub size_text: String,
+    /// Index of the tile this label names, in the frame's tile list: the
+    /// label reads against that tile's colour.
+    pub tile: usize,
 }
 
 /// How many labels one frame will shape.

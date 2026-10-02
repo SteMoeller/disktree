@@ -168,13 +168,15 @@ machine; see `crates/disktree-core/src/classify.rs`.
 
 Two controls in the legend row change how the mosaic is drawn:
 
-- **Block style** picks how each tile is raised, out of eight: *Classic* (the
-  original lit block), *Gloss*, *Neon*, *Anodized*, *Embossed*, *Grain*,
-  *Chiseled* and *Prism*. Every style builds its body, edges and shading from
-  the tile's own colour, so a tile keeps the hue that says what it is. The
-  CSS they stand for uses radial gradients, blurs and box shadows, none of
-  which gpui can draw: a tile is a solid or two-stop linear body with edge
-  borders layered over it, and that is how the styles are approximated.
+- **Block style** picks how each tile is drawn, out of eight: *Classic* (the
+  flat fill the app always had, and the default), *Gloss*, *Neon*,
+  *Anodized*, *Embossed*, *Grain*, *Chiseled* and *Prism*. Every raised style
+  builds its body, edges and shading from the tile's own colour, so a tile
+  keeps the hue that says what it is, and each label picks dark or light text
+  from the corner it sits on. The CSS they stand for uses radial gradients,
+  blurs and box shadows, none of which gpui can draw: a tile is a solid or
+  two-stop linear body with edge borders layered over it, and that is how the
+  styles are approximated.
 - **File type colors** colours files by their extension, and directories by
   the file type they are mostly made of, instead of by category. It is off by
   default.

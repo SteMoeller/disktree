@@ -143,8 +143,8 @@ pub fn mosaic(
                         window,
                     );
                     paint_labels(
-                        &labels, bounds, view, &colors, &font, name_size,
-                        size_size, window, cx,
+                        &labels, &tiles, bounds, view, &colors, block_style,
+                        &font, name_size, size_size, window, cx,
                     );
                 },
             )
@@ -158,7 +158,6 @@ struct Colors {
     /// Kept whole: a configured file-type colour is turned into a fill and an
     /// accent here, where the theme is at hand.
     theme: Theme,
-    label: [Hsla; 2],
     label_dim: Hsla,
     hover_border: Hsla,
     selected_border: Hsla,
@@ -207,10 +206,6 @@ impl Colors {
         };
         Self {
             theme: theme.clone(),
-            label: [
-                palette::label_color(theme, 0),
-                palette::label_color(theme, 1),
-            ],
             label_dim: palette::label_color(theme, 1).opacity(0.5),
             hover_border: theme.bright.opacity(0.55),
             selected_border: palette::highlight(theme),
@@ -264,10 +259,6 @@ impl Colors {
             Filtered::Holds => palette::mix(fill, self.inset, 0.55),
             Filtered::Out => palette::mix(fill, self.inset, 0.82),
         }
-    }
-
-    const fn label(&self, depth: u32) -> Hsla {
-        self.label[if depth == 0 { 0 } else { 1 }]
     }
 
     /// The accent strip over a top-level directory: the category's, or the
@@ -468,6 +459,12 @@ fn paint_block(
         solid,
     ));
 
+    // The flat style, which is the look the app had before blocks: just that
+    // body, with nothing laid over it.
+    if look.is_flat() {
+        return;
+    }
+
     // Everything past the body needs room; a tile smaller than a few pixels
     // keeps the body alone rather than turning into edges.
     let shortest = bounds.size.width.as_f32().min(bounds.size.height.as_f32());
@@ -646,9 +643,11 @@ fn snap(bounds: Bounds<Pixels>, scale: f32) -> Bounds<Pixels> {
 )]
 fn paint_labels(
     labels: &[Label],
+    tiles: &[TileDeco],
     bounds: Bounds<Pixels>,
     view: View,
     colors: &Colors,
+    block_style: BlockStyle,
     font: &SharedString,
     name_size: Pixels,
     size_size: Pixels,
@@ -668,8 +667,21 @@ fn paint_labels(
     let text_inset = name_size * 0.25;
     let min_width = name_size * 3.3;
     let size_gap = name_size * 0.67;
+    // The same bevel the painter uses, so the text can clear a style's ring.
+    let bevel = px((window.rem_size().as_f32() * 0.125).max(1.0));
 
     for label in labels {
+        // The tile this label belongs to, for its colour: a label sits on the
+        // tile's top-left corner, so that is what it has to read against.
+        let look = tiles
+            .get(label.tile)
+            .map(|tile| palette::block_look(block_style, colors.fill(tile)));
+        // A style with an inner ring needs the text to start inside it.
+        let ring = look
+            .as_ref()
+            .and_then(|look| look.ring)
+            .map_or(0.0, |ring| (bevel.as_f32() * ring.width).round());
+        let inset = px(ring);
         // A subdivided directory's name lives in the band it reserved; a leaf's
         // sits at the top of its own tile. Either way the mask is the region
         // the label owns, so no label can reach into another tile.
@@ -680,15 +692,20 @@ fn paint_labels(
         }
         let mask = to_window(&rect, bounds);
         let origin = Point::new(
-            mask.origin.x + text_padding,
-            mask.origin.y + text_inset,
+            mask.origin.x + text_padding + inset,
+            mask.origin.y + text_inset + inset,
         );
         let color = if label.marked {
             colors.marked_label
-        } else if label.dim {
-            colors.label_dim
         } else {
-            colors.label(label.depth)
+            let on_tile = look.as_ref().map_or(colors.label_dim, |look| {
+                palette::label_on(look.top_left())
+            });
+            if label.dim {
+                on_tile.opacity(0.55)
+            } else {
+                on_tile
+            }
         };
         // The first level is set in bold in its band: it names a region.
         let weight = if label.depth == 0 && label.header.is_some() {

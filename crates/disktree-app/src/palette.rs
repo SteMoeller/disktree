@@ -235,12 +235,14 @@ pub fn block_look(style: BlockStyle, base: Hsla) -> BlockLook {
     let edge = Edge::new;
     match style {
         BlockStyle::Classic => BlockLook {
-            gradient: Some((135.0, light(0.5), dark(0.5))),
+            // The flat look the app had before blocks: a plain fill, no
+            // gradient, no edge, nothing laid over it.
+            gradient: None,
             body: base,
-            top: edge(1.0, light(0.82)),
-            left: edge(1.0, light(0.82)),
-            right: edge(1.0, dark(0.75)),
-            bottom: edge(1.0, dark(0.75)),
+            top: edge(0.0, base),
+            left: edge(0.0, base),
+            right: edge(0.0, base),
+            bottom: edge(0.0, base),
             ring: None,
             shadow: false,
         },
@@ -255,13 +257,16 @@ pub fn block_look(style: BlockStyle, base: Hsla) -> BlockLook {
             shadow: true,
         },
         BlockStyle::Neon => BlockLook {
-            gradient: Some((145.0, dark(0.7), dark(0.88))),
-            body: dark(0.8),
-            top: edge(1.0, glow),
-            left: edge(1.0, glow),
-            right: edge(1.0, glow),
-            bottom: edge(1.0, glow),
-            ring: Some(edge(3.0, glow.opacity(0.28))),
+            // A lit edge around a body that still shows the tile's colour:
+            // the first version was so dark the hue was lost, and its glow
+            // was heavy enough to swallow the edge.
+            gradient: Some((145.0, dark(0.35), dark(0.6))),
+            body: dark(0.45),
+            top: edge(0.75, glow),
+            left: edge(0.75, glow),
+            right: edge(0.75, glow),
+            bottom: edge(0.75, glow),
+            ring: Some(edge(1.25, glow.opacity(0.35))),
             shadow: false,
         },
         BlockStyle::Anodized => BlockLook {
@@ -297,11 +302,12 @@ pub fn block_look(style: BlockStyle, base: Hsla) -> BlockLook {
         BlockStyle::Chiseled => BlockLook {
             gradient: None,
             body: base,
-            top: edge(2.5, light(0.55)),
-            left: edge(1.5, light(0.4)),
-            right: edge(1.5, dark(0.4)),
-            bottom: edge(2.5, dark(0.65)),
-            ring: Some(edge(2.0, black().opacity(0.25))),
+            // Hairline cuts: the first version's lit top was a bar.
+            top: edge(1.25, light(0.55)),
+            left: edge(1.0, light(0.4)),
+            right: edge(1.0, dark(0.4)),
+            bottom: edge(1.75, dark(0.65)),
+            ring: Some(edge(1.5, black().opacity(0.25))),
             shadow: false,
         },
         BlockStyle::Prism => BlockLook {
@@ -314,6 +320,51 @@ pub fn block_look(style: BlockStyle, base: Hsla) -> BlockLook {
             ring: Some(edge(1.0, dark(0.25))),
             shadow: false,
         },
+    }
+}
+
+impl BlockLook {
+    /// Whether the tile is a plain fill: no gradient, no edge, no ring and no
+    /// shadow. That is the "Classic" style, which is the look the app had
+    /// before blocks existed.
+    pub fn is_flat(&self) -> bool {
+        self.gradient.is_none()
+            && self.top.width == 0.0
+            && self.left.width == 0.0
+            && self.right.width == 0.0
+            && self.bottom.width == 0.0
+            && self.ring.is_none()
+            && !self.shadow
+    }
+
+    /// The colour of the tile's top-left corner, which is where its label
+    /// sits: the gradient's lit end, or the body when there is no gradient.
+    pub fn top_left(&self) -> Hsla {
+        self.gradient.map_or(self.body, |(_, from, _)| from)
+    }
+}
+
+/// Text that reads on `top`, the colour the label is drawn over: dark on a
+/// light corner, light on a dark one. Without this a near-white style (and
+/// anodized is one) had the theme's light text on it and none of it read.
+pub fn label_on(top: Hsla) -> Hsla {
+    let rgb = top.to_rgb();
+    let luminance =
+        0.2126f32.mul_add(rgb.r, 0.7152f32.mul_add(rgb.g, 0.0722 * rgb.b));
+    if luminance * 255.0 > 127.0 {
+        Hsla::from(Rgba {
+            r: 0.06,
+            g: 0.07,
+            b: 0.09,
+            a: 1.0,
+        })
+    } else {
+        Hsla::from(Rgba {
+            r: 0.97,
+            g: 0.97,
+            b: 0.98,
+            a: 1.0,
+        })
     }
 }
 
@@ -514,7 +565,7 @@ mod tests {
     }
 
     #[test]
-    fn the_classic_block_is_lit_at_its_top_and_shaded_at_its_foot() {
+    fn the_classic_block_is_the_flat_look() {
         let base = Hsla {
             h: 0.6,
             s: 0.3,
@@ -522,15 +573,52 @@ mod tests {
             a: 1.0,
         };
         let look = block_look(BlockStyle::Classic, base);
-        let (_, light, dark) = look.gradient.expect("a gradient");
-        assert!(light.l > base.l + 0.1, "the lit end is clearly lighter");
-        assert!(dark.l < base.l - 0.1, "the shaded end is clearly darker");
-        assert!((light.h - base.h).abs() < 0.02, "the hue stays put");
+        assert!(look.is_flat(), "classic is the plain fill");
+        assert!(
+            (look.body.l - base.l).abs() < 1e-6,
+            "and it is the tile's own colour"
+        );
+        assert!((look.top_left().l - base.l).abs() < 1e-6);
+    }
 
-        // The edges are brighter and darker than the body, so the block
-        // reads as a solid object rather than a soft gradient.
-        assert!(look.top.color.l > light.l, "the lit edge is brighter");
-        assert!(look.bottom.color.l < dark.l, "the shaded edge is darker");
+    #[test]
+    fn a_label_is_dark_on_a_light_tile_and_light_on_a_dark_one() {
+        let light = Hsla {
+            h: 0.1,
+            s: 0.2,
+            l: 0.9,
+            a: 1.0,
+        };
+        let dark = Hsla {
+            h: 0.6,
+            s: 0.5,
+            l: 0.2,
+            a: 1.0,
+        };
+        assert!(label_on(light).l < 0.3, "dark text on a light tile");
+        assert!(label_on(dark).l > 0.7, "light text on a dark tile");
+    }
+
+    #[test]
+    fn the_light_styles_take_dark_text() {
+        let base = Hsla {
+            h: 0.11,
+            s: 0.7,
+            l: 0.5,
+            a: 1.0,
+        };
+        for style in [
+            BlockStyle::Anodized,
+            BlockStyle::Gloss,
+            BlockStyle::Grain,
+            BlockStyle::Prism,
+        ] {
+            let look = block_look(style, base);
+            assert!(
+                label_on(look.top_left()).l < 0.5,
+                "{style:?} has a light corner and needs dark text"
+            );
+        }
     }
 
     #[test]
@@ -543,8 +631,15 @@ mod tests {
         };
         for style in BlockStyle::ALL {
             let look = block_look(style, base);
-            assert!((look.body.h - base.h).abs() < 0.02, "{style:?} body hue");
             assert!(look.body.a > 0.99, "{style:?} body is opaque");
+            if look.is_flat() {
+                assert!(
+                    (look.body.l - base.l).abs() < 1e-6,
+                    "{style:?} paints the tile's own colour"
+                );
+                continue;
+            }
+            assert!((look.body.h - base.h).abs() < 0.02, "{style:?} body hue");
             for edge in [look.top, look.left, look.right, look.bottom] {
                 assert!(edge.width > 0.0, "{style:?} has a zero-width edge");
                 assert!(
