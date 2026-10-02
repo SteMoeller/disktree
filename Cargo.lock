@@ -1420,7 +1420,7 @@ dependencies = [
 
 [[package]]
 name = "disktree-app"
-version = "0.10.1"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "disktree-core",
@@ -1434,7 +1434,7 @@ dependencies = [
 
 [[package]]
 name = "disktree-core"
-version = "0.10.1"
+version = "0.11.0"
 dependencies = [
  "chrono",
  "rayon",
@@ -8671,7 +8671,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.10.1"
+version = "0.11.0"
 
 [[package]]
 name = "y4m"

@@ -53,8 +53,17 @@ jobs:
           TAG: ${{ steps.version.outputs.tag }}
         run: |
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --draft --verify-tag \
-              --title "disktree ${TAG#v}" --generate-notes
+            # A curated notes file for this tag wins over generated notes, so
+            # a fork can describe its own changes; without one, GitHub's
+            # generated notes are used, as before.
+            notes=".github/release-notes/${TAG}.md"
+            if [ -f "$notes" ]; then
+              gh release create "$TAG" --draft --verify-tag \
+                --title "disktree ${TAG#v}" --notes-file "$notes"
+            else
+              gh release create "$TAG" --draft --verify-tag \
+                --title "disktree ${TAG#v}" --generate-notes
+            fi
           fi
 
   linux:
