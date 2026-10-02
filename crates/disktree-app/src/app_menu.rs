@@ -39,6 +39,8 @@ mod menu_actions {
             GoBack,
             /// Forward again, after going back.
             GoForward,
+            /// Restart the application elevated, on Windows.
+            Administrator,
         ]
     );
 }
@@ -70,6 +72,9 @@ pub fn install(cx: &mut App) {
             KeyBinding::new("ctrl-r", Rescan, None),
             KeyBinding::new("f5", Rescan, None),
             KeyBinding::new("ctrl-shift-r", ShowInFinder, None),
+            // The elevated restart, wanted before any scan has finished
+            // rather than only once the walk reports something unreadable.
+            KeyBinding::new("ctrl-shift-a", Administrator, None),
         ]);
         return;
     }

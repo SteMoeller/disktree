@@ -45,6 +45,8 @@ struct Args {
     root: PathBuf,
     options: ScanOptions,
     depth: u32,
+    /// `-A`: ask for the elevated scan before reading a single entry.
+    administrator: bool,
 }
 
 const USAGE: &str = "\
@@ -68,6 +70,7 @@ options:
                         filesystems mounted below PATH (off by default)
   -d, --depth N         how many levels to draw at once (1-6, default 3)
       --metric files    rank by file count instead of bytes
+  -A, --administrator   start elevated on Windows, before scanning
   -h, --help            show this help
 ";
 
@@ -86,6 +89,21 @@ fn run() -> Result<()> {
     // File-type colours, likewise; see `ext_colors`.
     ext_colors::load();
     let args = parse_args(std::env::args_os().skip(1))?;
+
+    // `-A` asks for the elevated scan up front, before a single entry is
+    // read: relaunch through the UAC prompt and let this copy exit. Already
+    // elevated, or declined, the scan simply runs here instead. The flag is
+    // passed on, and the elevated copy sees it is already an administrator
+    // and does not ask again.
+    if args.administrator
+        && disktree_core::access::administrator() == Some(false)
+    {
+        let forwarded: Vec<std::ffi::OsString> =
+            std::env::args_os().skip(1).collect();
+        if disktree_core::access::restart_as_administrator(&forwarded).is_ok() {
+            return Ok(());
+        }
+    }
 
     // When the app executable is reached through the command-line symlink,
     // cmux sends SIGTERM to its foreground process group as AppKit takes
@@ -337,6 +355,7 @@ fn parse_args(
     let mut options = ScanOptions::default();
     let mut depth = 3_u32;
     let mut disk = false;
+    let mut administrator = false;
     // `std::env::args` panics on a name that is not Unicode, and a path is
     // any name: a restart as administrator hands the root back exactly as
     // it was, so the caller passes `args_os`.
@@ -360,6 +379,7 @@ fn parse_args(
             "-x" | "--one-filesystem" => options.one_filesystem = true,
             "-X" | "--cross-filesystems" => options.one_filesystem = false,
             "-D" | "--disk" => disk = true,
+            "-A" | "--administrator" => administrator = true,
             "-d" | "--depth" => {
                 let value = text(args.next(), "--depth needs a number")?;
                 depth = value.parse().context("--depth needs a number")?;
@@ -418,6 +438,7 @@ fn parse_args(
         root,
         options,
         depth: depth.clamp(1, 6),
+        administrator,
     })
 }
 

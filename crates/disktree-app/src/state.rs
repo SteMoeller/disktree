@@ -3140,7 +3140,14 @@ impl Disktree {
     /// Declined, nothing changes. Not while a removal runs: quitting would
     /// stop a permanent delete halfway.
     pub fn restart_as_administrator(&mut self, cx: &mut Context<'_, Self>) {
-        if self.restarting || self.run.is_some() {
+        // Only a non-elevated Windows run gains anything: restarting an
+        // administrator would ask for the elevation it already has, and off
+        // Windows the offer does not exist. The keyboard shortcut can be
+        // pressed anywhere, so the check lives here too.
+        if self.restarting
+            || self.run.is_some()
+            || self.administrator != Some(false)
+        {
             return;
         }
         self.restarting = true;

@@ -88,6 +88,13 @@ pub fn root(
                 }
             },
         ))
+        // Wanted from the first frame, not only once the walk has reported
+        // something unreadable; the restart itself checks the rest.
+        .on_action(cx.listener(
+            |this, _: &crate::app_menu::Administrator, _, cx| {
+                this.restart_as_administrator(cx);
+            },
+        ))
         .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
             if this.zoom_interface(event, window) {
                 cx.notify();

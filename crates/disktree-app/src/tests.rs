@@ -1893,3 +1893,26 @@ fn restart_arguments_parse_back_to_the_same_scan() {
         );
     }
 }
+
+/// `-A` asks for the elevated start and is read back by the command line;
+/// off unless it is given.
+#[test]
+fn the_administrator_flag_is_parsed() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let root = dunce::canonicalize(temp.path()).expect("canonical root");
+    for flag in ["-A", "--administrator"] {
+        let parsed = crate::parse_args(
+            [
+                std::ffi::OsString::from(flag),
+                root.clone().into_os_string(),
+            ]
+            .into_iter(),
+        )
+        .expect("parses");
+        assert!(parsed.administrator, "{flag} asks for it");
+        assert_eq!(parsed.root, root);
+    }
+    let plain =
+        crate::parse_args([root.into_os_string()].into_iter()).expect("parses");
+    assert!(!plain.administrator, "off unless asked");
+}
