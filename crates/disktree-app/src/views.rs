@@ -20,7 +20,7 @@ use gpui_kit::{
 use gpui_omarchy::{
     ActiveTheme, ButtonVariant, ChoiceItem, Theme, alert_dialog, button,
     button_group, checkbox, dialog_button, dialog_description, dialog_popup,
-    dialog_title, separator, with_tooltip,
+    dialog_title, select, separator, with_tooltip,
 };
 
 use gpui_kit::prelude::FluentBuilder as _;
@@ -356,6 +356,8 @@ fn explore(
     cx: &mut Context<'_, Disktree>,
 ) -> Div {
     let theme = cx.omarchy().clone();
+    // The picker needs a window, which the first frame is the first to have.
+    app.ensure_block_choice(window, cx);
     let mosaic: Mosaic = app.prepare();
     let width_rems = window.viewport_size().width.as_f32() / app.rem;
     // The panel is where the selection, the marks and the disk live; it
@@ -405,7 +407,7 @@ fn explore(
                         .flex_1()
                         .min_w_0()
                         .min_h_0()
-                        .child(trail_and_legend(app, &theme, cx))
+                        .child(trail_and_legend(app, &theme, window, cx))
                         .child(
                             div()
                                 .flex()
@@ -1001,7 +1003,8 @@ fn view_settings(
 fn trail_and_legend(
     app: &Disktree,
     theme: &Theme,
-    cx: &Context<'_, Disktree>,
+    window: &mut Window,
+    cx: &mut Context<'_, Disktree>,
 ) -> Div {
     let mut row = div()
         .flex()
@@ -1016,15 +1019,19 @@ fn trail_and_legend(
     }
     row.child(div().flex_1())
         // How the mosaic is drawn, next to the key to its colours.
-        .child(rendering_toggles(app, cx))
+        .child(rendering_toggles(app, window, cx))
         .child(legend(app, theme, cx))
 }
 
-/// The *3D blocks* and *File type colors* checkboxes.
+/// The block-style picker and the *File type colors* checkbox.
 ///
 /// They live here rather than in the top bar's settings row: that row is
 /// full, and squeezing the trail there costs the crumb menus their room.
-fn rendering_toggles(app: &Disktree, cx: &Context<'_, Disktree>) -> Div {
+fn rendering_toggles(
+    app: &Disktree,
+    window: &mut Window,
+    cx: &mut Context<'_, Disktree>,
+) -> Div {
     let focus = app.focus.clone();
     let entity = cx.entity().downgrade();
     let check = |on: bool| {
@@ -1033,22 +1040,6 @@ fn rendering_toggles(app: &Disktree, cx: &Context<'_, Disktree>) -> Div {
         } else {
             CheckboxState::Unchecked
         }
-    };
-    let blocks_3d = {
-        let entity = entity.clone();
-        let focus = focus.clone();
-        checkbox(
-            "blocks-3d",
-            crate::i18n::t("3D blocks"),
-            check(app.blocks_3d),
-            cx,
-        )
-        .tab_stop(false)
-        .on_change(move |_, _, window, cx| {
-            let _ = entity
-                .update(cx, |this, cx| this.set_blocks_3d(!this.blocks_3d, cx));
-            window.focus(&focus, cx);
-        })
     };
     let ext_colors = {
         checkbox(
@@ -1065,14 +1056,23 @@ fn rendering_toggles(app: &Disktree, cx: &Context<'_, Disktree>) -> Div {
             window.focus(&focus, cx);
         })
     };
-    div()
+    let mut toggles = div()
         .flex()
         .flex_row()
         .items_center()
         .gap(space::MD)
-        .flex_shrink_0()
-        .child(blocks_3d)
-        .child(ext_colors)
+        .flex_shrink_0();
+    if let Some(choice) = app.block_choice() {
+        // A fixed lane, so a longer style name cannot push the legend about.
+        toggles =
+            toggles.child(div().flex_shrink_0().w(Rems(9.5)).child(select(
+                "block-style",
+                choice,
+                window,
+                cx,
+            )));
+    }
+    toggles.child(ext_colors)
 }
 
 /// What the whole scan found, as one quiet line; unreadable paths are

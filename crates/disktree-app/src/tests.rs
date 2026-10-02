@@ -115,33 +115,38 @@ fn the_window_draws_a_treemap_with_tiles(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn the_rendering_toggles_change_the_drawing_and_default_off(
+fn the_block_style_and_the_extension_toggle_reach_the_mosaic(
     cx: &mut TestAppContext,
 ) {
+    use crate::palette::BlockStyle;
+
     cx.update(gpui_omarchy::init);
     let temp = fixture();
     let (view, cx) = view_over(temp.path(), cx);
     draw(cx);
 
-    // Off by default: the flat category fill, no raised blocks, no file-type
-    // colours. This is the look the README describes.
+    // The original block style is the default, and no file-type colour is on.
     let mosaic = update(&view, cx, |app, _| app.prepare());
-    assert!(!mosaic.blocks_3d, "raised blocks are opt-in");
+    assert_eq!(mosaic.block_style, BlockStyle::Classic, "the default style");
     assert!(!read(&view, cx, |app| app.ext_colors));
     assert!(mosaic.tiles.iter().all(|tile| tile.ext_color.is_none()));
 
-    // Raised blocks: the flag rides into the painted frame.
-    update(&view, cx, |app, cx| app.set_blocks_3d(true, cx));
-    draw(cx);
-    let mosaic = update(&view, cx, |app, _| app.prepare());
-    assert!(mosaic.blocks_3d);
+    // Every style rides into the painted frame.
+    for style in BlockStyle::ALL {
+        update(&view, cx, |app, cx| app.set_block_style(style, cx));
+        draw(cx);
+        let mosaic = update(&view, cx, |app, _| app.prepare());
+        assert_eq!(mosaic.block_style, style, "{style:?} reaches the mosaic");
+    }
+    assert!(mosaic_is_ext_colour_free(&view, cx));
+}
 
-    // Back off draws exactly as before again.
-    update(&view, cx, |app, cx| app.set_blocks_3d(false, cx));
-    draw(cx);
-    let mosaic = update(&view, cx, |app, _| app.prepare());
-    assert!(!mosaic.blocks_3d);
-    assert!(mosaic.tiles.iter().all(|tile| tile.ext_color.is_none()));
+/// No tile carries a configured file-type colour while the toggle is off.
+fn mosaic_is_ext_colour_free(view: &Entity<Disktree>, cx: &mut Window) -> bool {
+    update(view, cx, |app, _| app.prepare())
+        .tiles
+        .iter()
+        .all(|tile| tile.ext_color.is_none())
 }
 
 #[gpui_kit::test]

@@ -166,14 +166,18 @@ machine; see `crates/disktree-core/src/classify.rs`.
 
 ### Raised blocks and file-type colours
 
-Two checkboxes in the top bar change how the mosaic is drawn. Both are off by
-default, so the flat category look above is what opens:
+Two controls in the legend row change how the mosaic is drawn:
 
-- **3D blocks** lifts each tile into a lit, bevel-edged block: a gradient from
-  its top-left to its bottom-right, then a lighter edge above and on the left
-  and a darker one below and on the right.
+- **Block style** picks how each tile is raised, out of eight: *Classic* (the
+  original lit block), *Gloss*, *Neon*, *Anodized*, *Embossed*, *Grain*,
+  *Chiseled* and *Prism*. Every style builds its body, edges and shading from
+  the tile's own colour, so a tile keeps the hue that says what it is. The
+  CSS they stand for uses radial gradients, blurs and box shadows, none of
+  which gpui can draw: a tile is a solid or two-stop linear body with edge
+  borders layered over it, and that is how the styles are approximated.
 - **File type colors** colours files by their extension, and directories by
-  the file type they are mostly made of, instead of by category.
+  the file type they are mostly made of, instead of by category. It is off by
+  default.
 
 The file-type colours come from `disktree.ext.colors.txt`, looked up beside
 the executable, in the working directory, then under `%APPDATA%\disktree`

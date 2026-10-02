@@ -111,19 +111,210 @@ fn black() -> Hsla {
     })
 }
 
-/// The two ends of a raised block's body: the colour lifted well toward the
-/// light at its top-left and dropped well toward the shade at its
-/// bottom-right, so the block reads as raised rather than as a flat fill.
-/// Mixed in RGB, so the hue stays put.
-pub fn cushion_ends(base: Hsla) -> (Hsla, Hsla) {
-    (mix(base, white(), 0.5), mix(base, black(), 0.5))
+/// The eight ways a raised tile can be painted.
+///
+/// The CSS shapes they stand for use radial gradients, blurs and box shadows,
+/// none of which gpui can draw: a tile is built from a solid or two-stop
+/// linear body plus borders, which is what [`block_look`] hands the painter.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BlockStyle {
+    /// The original lit block: a diagonal gradient with a bevelled edge.
+    #[default]
+    Classic,
+    /// A glossy top-down sheen with a hard bottom shadow.
+    Gloss,
+    /// A dark ground with a bright edge of the tile's own hue.
+    Neon,
+    /// Brushed metal: a steep gradient and a bright band.
+    Anodized,
+    /// A solid body pressed in, with a dark inner ring.
+    Embossed,
+    /// A soft gradient with a light grain edge and a drop shadow.
+    Grain,
+    /// A solid body with four thick, differently lit cut edges.
+    Chiseled,
+    /// A hard fold down the middle, with hairline inner edges.
+    Prism,
 }
 
-/// The block's bevel edges, brighter and darker than the body beneath them:
-/// a hard edge is what makes the block look like a solid object instead of a
-/// soft gradient.
-pub fn cushion_edges(base: Hsla) -> (Hsla, Hsla) {
-    (mix(base, white(), 0.82), mix(base, black(), 0.75))
+impl BlockStyle {
+    /// Every style, in the dropdown's order.
+    pub const ALL: [Self; 8] = [
+        Self::Classic,
+        Self::Gloss,
+        Self::Neon,
+        Self::Anodized,
+        Self::Embossed,
+        Self::Grain,
+        Self::Chiseled,
+        Self::Prism,
+    ];
+
+    /// The stable value the picker stores and hands back.
+    pub const fn value(self) -> &'static str {
+        match self {
+            Self::Classic => "classic",
+            Self::Gloss => "gloss",
+            Self::Neon => "neon",
+            Self::Anodized => "anodized",
+            Self::Embossed => "embossed",
+            Self::Grain => "grain",
+            Self::Chiseled => "chiseled",
+            Self::Prism => "prism",
+        }
+    }
+
+    /// The picker entry's text, which is also its i18n key.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Classic => "Classic",
+            Self::Gloss => "Gloss",
+            Self::Neon => "Neon",
+            Self::Anodized => "Anodized",
+            Self::Embossed => "Embossed",
+            Self::Grain => "Grain",
+            Self::Chiseled => "Chiseled",
+            Self::Prism => "Prism",
+        }
+    }
+
+    /// The style a picker value names, the default one when it is unknown.
+    pub fn from_value(value: &str) -> Self {
+        Self::ALL
+            .into_iter()
+            .find(|style| style.value() == value)
+            .unwrap_or_default()
+    }
+}
+
+/// One side of a tile's edge: how thick, in bevel units, and in what colour.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Edge {
+    /// Multiples of the tile's bevel, which is a fraction of a rem.
+    pub width: f32,
+    pub color: Hsla,
+}
+
+impl Edge {
+    pub const fn new(width: f32, color: Hsla) -> Self {
+        Self { width, color }
+    }
+}
+
+/// Everything one raised tile needs, worked out from its base colour.
+#[derive(Clone, Copy, Debug)]
+pub struct BlockLook {
+    /// The body's gradient, as angle and its two ends; a solid fill when
+    /// `None`.
+    pub gradient: Option<(f32, Hsla, Hsla)>,
+    pub body: Hsla,
+    pub top: Edge,
+    pub left: Edge,
+    pub right: Edge,
+    pub bottom: Edge,
+    /// A uniform ring drawn inside the body.
+    pub ring: Option<Edge>,
+    /// Whether the tile casts a drop shadow behind it.
+    pub shadow: bool,
+}
+
+/// The look for `style`, over a tile whose fill is `base`.
+///
+/// Every colour is derived from `base`, so a tile keeps the hue that says
+/// what it is whatever its kind; the styles differ in contrast, direction,
+/// edge weight and the layers drawn over the body.
+pub fn block_look(style: BlockStyle, base: Hsla) -> BlockLook {
+    let light = |t: f32| mix(base, white(), t);
+    let dark = |t: f32| mix(base, black(), t);
+    // A bright, saturated version of the tile's own hue, for neon edges.
+    let glow = Hsla {
+        s: base.s.mul_add(1.8, 0.35).min(1.0),
+        l: 0.62,
+        ..base
+    };
+    let edge = Edge::new;
+    match style {
+        BlockStyle::Classic => BlockLook {
+            gradient: Some((135.0, light(0.5), dark(0.5))),
+            body: base,
+            top: edge(1.0, light(0.82)),
+            left: edge(1.0, light(0.82)),
+            right: edge(1.0, dark(0.75)),
+            bottom: edge(1.0, dark(0.75)),
+            ring: None,
+            shadow: false,
+        },
+        BlockStyle::Gloss => BlockLook {
+            gradient: Some((160.0, light(0.6), dark(0.5))),
+            body: base,
+            top: edge(1.5, light(0.9)),
+            left: edge(0.5, light(0.5)),
+            right: edge(0.5, dark(0.6)),
+            bottom: edge(1.5, dark(0.85)),
+            ring: None,
+            shadow: true,
+        },
+        BlockStyle::Neon => BlockLook {
+            gradient: Some((145.0, dark(0.7), dark(0.88))),
+            body: dark(0.8),
+            top: edge(1.0, glow),
+            left: edge(1.0, glow),
+            right: edge(1.0, glow),
+            bottom: edge(1.0, glow),
+            ring: Some(edge(3.0, glow.opacity(0.28))),
+            shadow: false,
+        },
+        BlockStyle::Anodized => BlockLook {
+            gradient: Some((115.0, light(0.55), dark(0.55))),
+            body: base,
+            top: edge(1.0, light(0.9)),
+            left: edge(1.0, light(0.7)),
+            right: edge(2.0, dark(0.55)),
+            bottom: edge(2.0, dark(0.75)),
+            ring: Some(edge(1.0, light(0.35))),
+            shadow: false,
+        },
+        BlockStyle::Embossed => BlockLook {
+            gradient: None,
+            body: base,
+            top: edge(1.5, light(0.45)),
+            left: edge(1.0, light(0.3)),
+            right: edge(1.0, dark(0.4)),
+            bottom: edge(1.5, dark(0.55)),
+            ring: Some(edge(3.0, dark(0.5))),
+            shadow: false,
+        },
+        BlockStyle::Grain => BlockLook {
+            gradient: Some((135.0, light(0.4), dark(0.4))),
+            body: base,
+            top: edge(1.0, light(0.5)),
+            left: edge(1.0, light(0.5)),
+            right: edge(1.0, dark(0.5)),
+            bottom: edge(1.0, dark(0.5)),
+            ring: None,
+            shadow: true,
+        },
+        BlockStyle::Chiseled => BlockLook {
+            gradient: None,
+            body: base,
+            top: edge(2.5, light(0.55)),
+            left: edge(1.5, light(0.4)),
+            right: edge(1.5, dark(0.4)),
+            bottom: edge(2.5, dark(0.65)),
+            ring: Some(edge(2.0, black().opacity(0.25))),
+            shadow: false,
+        },
+        BlockStyle::Prism => BlockLook {
+            gradient: Some((135.0, light(0.65), dark(0.6))),
+            body: base,
+            top: edge(1.0, light(0.85)),
+            left: edge(1.0, light(0.6)),
+            right: edge(1.0, dark(0.7)),
+            bottom: edge(1.0, dark(0.85)),
+            ring: Some(edge(1.0, dark(0.25))),
+            shadow: false,
+        },
+    }
 }
 
 /// The age ramp, newest first: this week, this month, this half-year, this
@@ -323,23 +514,95 @@ mod tests {
     }
 
     #[test]
-    fn a_raised_block_is_lit_at_its_top_and_shaded_at_its_foot() {
+    fn the_classic_block_is_lit_at_its_top_and_shaded_at_its_foot() {
         let base = Hsla {
             h: 0.6,
             s: 0.3,
             l: 0.5,
             a: 1.0,
         };
-        let (light, dark) = cushion_ends(base);
+        let look = block_look(BlockStyle::Classic, base);
+        let (_, light, dark) = look.gradient.expect("a gradient");
         assert!(light.l > base.l + 0.1, "the lit end is clearly lighter");
         assert!(dark.l < base.l - 0.1, "the shaded end is clearly darker");
         assert!((light.h - base.h).abs() < 0.02, "the hue stays put");
 
-        // The bevel edges are brighter and darker still, so the block reads
-        // as a solid object rather than a soft gradient.
-        let (highlight, shadow) = cushion_edges(base);
-        assert!(highlight.l > light.l, "the lit edge is brighter");
-        assert!(shadow.l < dark.l, "the shaded edge is darker");
+        // The edges are brighter and darker than the body, so the block
+        // reads as a solid object rather than a soft gradient.
+        assert!(look.top.color.l > light.l, "the lit edge is brighter");
+        assert!(look.bottom.color.l < dark.l, "the shaded edge is darker");
+    }
+
+    #[test]
+    fn every_block_style_derives_its_look_from_the_tile_colour() {
+        let base = Hsla {
+            h: 0.55,
+            s: 0.55,
+            l: 0.5,
+            a: 1.0,
+        };
+        for style in BlockStyle::ALL {
+            let look = block_look(style, base);
+            assert!((look.body.h - base.h).abs() < 0.02, "{style:?} body hue");
+            assert!(look.body.a > 0.99, "{style:?} body is opaque");
+            for edge in [look.top, look.left, look.right, look.bottom] {
+                assert!(edge.width > 0.0, "{style:?} has a zero-width edge");
+                assert!(
+                    (edge.color.l - look.body.l).abs() > 0.05,
+                    "{style:?} edge has no contrast with the body"
+                );
+            }
+            if let Some((angle, from, to)) = look.gradient {
+                assert!(angle.is_finite(), "{style:?} angle");
+                assert!(
+                    (from.l - to.l).abs() > 0.03,
+                    "{style:?} gradient has no contrast"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_block_style_is_a_distinct_look() {
+        let base = Hsla {
+            h: 0.55,
+            s: 0.55,
+            l: 0.5,
+            a: 1.0,
+        };
+        let signature = |style: BlockStyle| {
+            let look = block_look(style, base);
+            (
+                look.gradient.map(|(angle, from, to)| (angle, from.l, to.l)),
+                look.body.l,
+                look.top.width,
+                look.top.color.l,
+                look.left.width,
+                look.right.width,
+                look.bottom.width,
+                look.bottom.color.l,
+                look.ring
+                    .map(|edge| (edge.width, edge.color.l, edge.color.a)),
+                look.shadow,
+            )
+        };
+        let looks: Vec<_> =
+            BlockStyle::ALL.into_iter().map(signature).collect();
+        for (index, left) in looks.iter().enumerate() {
+            for right in &looks[index + 1..] {
+                assert_ne!(left, right, "two styles paint the same");
+            }
+        }
+    }
+
+    #[test]
+    fn a_style_value_round_trips_and_defaults_to_classic() {
+        for style in BlockStyle::ALL {
+            assert_eq!(BlockStyle::from_value(style.value()), style);
+            assert!(!style.label().is_empty());
+        }
+        assert_eq!(BlockStyle::from_value("nonsense"), BlockStyle::Classic);
+        assert_eq!(BlockStyle::default(), BlockStyle::Classic);
     }
 
     #[test]

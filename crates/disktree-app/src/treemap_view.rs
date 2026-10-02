@@ -23,7 +23,7 @@ use gpui_omarchy::{ActiveTheme, Theme};
 
 use disktree_core::classify::Category;
 
-use crate::palette;
+use crate::palette::{self, BlockLook, BlockStyle, Edge};
 use crate::state::{Disktree, Filtered, Label, View};
 
 /// How one tile should be drawn, resolved before the paint callback runs so
@@ -61,9 +61,8 @@ pub struct Mosaic {
     pub tiles: Vec<TileDeco>,
     pub labels: Vec<Label>,
     pub view: View,
-    /// Draw each tile as a raised block: a lit gradient body with a bevel,
-    /// instead of a flat fill.
-    pub blocks_3d: bool,
+    /// How raised tiles are painted.
+    pub block_style: BlockStyle,
 }
 
 /// Build the treemap viewport: canvas, input, and the cursor tooltip.
@@ -87,7 +86,7 @@ pub fn mosaic(
         tiles,
         labels,
         view,
-        blocks_3d,
+        block_style,
     } = mosaic;
     let canvas_origin = Rc::clone(&origin);
     let canvas_measured = Rc::clone(&measured);
@@ -136,7 +135,12 @@ pub fn mosaic(
                 },
                 move |bounds, _, window, cx| {
                     paint_tiles(
-                        &tiles, bounds, view, &colors, blocks_3d, window,
+                        &tiles,
+                        bounds,
+                        view,
+                        &colors,
+                        block_style,
+                        window,
                     );
                     paint_labels(
                         &labels, bounds, view, &colors, &font, name_size,
@@ -281,7 +285,7 @@ fn paint_tiles(
     bounds: Bounds<Pixels>,
     view: View,
     colors: &Colors,
-    blocks_3d: bool,
+    block_style: BlockStyle,
     window: &mut Window,
 ) {
     let none = Edges::all(px(0.));
@@ -291,6 +295,43 @@ fn paint_tiles(
     // relationship to the tiles at every interface-zoom step; never thinner
     // than a pixel, or it would disappear.
     let bevel = px((window.rem_size().as_f32() * 0.125).max(1.0));
+
+    // Drop shadows go under every tile: painted first, they only survive in
+    // the gaps between tiles, which is exactly where a shadow is wanted.
+    if tiles
+        .iter()
+        .any(|tile| palette::block_look(block_style, colors.fill(tile)).shadow)
+    {
+        for tile in tiles {
+            let rect = view.project(tile.rect);
+            if rect.w <= 6.0 || rect.h <= 6.0 {
+                continue;
+            }
+            let quad_bounds = snap(to_window(&rect, bounds), scale);
+            let look = palette::block_look(block_style, colors.fill(tile));
+            if !look.shadow {
+                continue;
+            }
+            let shadow = Bounds::new(
+                Point::new(quad_bounds.origin.x, quad_bounds.origin.y + bevel),
+                quad_bounds.size,
+            );
+            window.paint_quad(quad(
+                shadow,
+                Corners::default(),
+                Hsla::from(gpui_kit::Rgba {
+                    r: 0.0,
+                    g: 0.0,
+                    b: 0.0,
+                    a: 0.4,
+                }),
+                none,
+                Hsla::default(),
+                solid,
+            ));
+        }
+    }
+
     // Outlines are drawn after every fill: a directory's children paint over
     // its body, and would otherwise cover its selection ring, leaving only
     // slivers of it showing in the gaps between them.
@@ -302,20 +343,8 @@ fn paint_tiles(
         }
         let quad_bounds = snap(to_window(&rect, bounds), scale);
 
-        if blocks_3d {
-            paint_block(window, quad_bounds, colors.fill(tile), bevel);
-        } else {
-            // No border by default: the gaps between tiles, wider between the
-            // top-level directories, are what separate them.
-            window.paint_quad(quad(
-                quad_bounds,
-                Corners::default(),
-                colors.fill(tile),
-                none,
-                colors.hover_border,
-                solid,
-            ));
-        }
+        let look = palette::block_look(block_style, colors.fill(tile));
+        paint_block(window, quad_bounds, &look, bevel);
 
         // Reclaimable space is hatched, over any hue: the hatch answers
         // "can it go", the colour "what is it". Everything inside a
@@ -405,76 +434,192 @@ fn paint_tiles(
     }
 }
 
-/// A tile drawn as a raised block: a body lit toward its top-left and shaded
-/// toward its bottom-right, then four bevel edges on top, lighter than the body
-/// above and on the left, darker below and on the right. No shadows are painted
-/// between blocks — their sizes would need the neighbours, and the bevel alone
-/// reads as depth.
+/// A tile painted as a raised block from a [`BlockLook`]: its body (a solid
+/// fill or a two-stop linear gradient), an optional inner ring, and the edge
+/// borders that make it read as a solid object.
+///
+/// gpui can only fill quads, so the CSS the styles stand for — radial
+/// highlights, blurs, box shadows — is approximated by these layers; a drop
+/// shadow, where a style has one, is painted in a pass of its own before any
+/// tile, in [`paint_tiles`].
 fn paint_block(
     window: &mut Window,
     bounds: Bounds<Pixels>,
-    base: Hsla,
+    look: &BlockLook,
     bevel: Pixels,
 ) {
     let none = Edges::all(px(0.));
     let solid = gpui_kit::BorderStyle::Solid;
     let clear = gpui_kit::transparent_black();
-    // The gradient runs from the lit corner to the shaded one diagonally,
-    // which is what makes a cushion read as raised rather than banded.
-    let (light, dark) = palette::cushion_ends(base);
+    let background = match look.gradient {
+        Some((angle, from, to)) => linear_gradient(
+            angle,
+            linear_color_stop(from, 0.0),
+            linear_color_stop(to, 1.0),
+        ),
+        None => look.body.into(),
+    };
     window.paint_quad(quad(
         bounds,
         Corners::default(),
-        linear_gradient(
-            135.0,
-            linear_color_stop(light, 0.0),
-            linear_color_stop(dark, 1.0),
-        ),
+        background,
         none,
         clear,
         solid,
     ));
 
-    // A tile too small to hold two bevels keeps the gradient alone.
-    let width = bevel
-        .as_f32()
-        .min(bounds.size.width.as_f32() * 0.25)
-        .min(bounds.size.height.as_f32() * 0.25);
-    if width < 1.0 {
+    // Everything past the body needs room; a tile smaller than a few pixels
+    // keeps the body alone rather than turning into edges.
+    let shortest = bounds.size.width.as_f32().min(bounds.size.height.as_f32());
+    if shortest < 6.0 {
         return;
     }
-    let width = px(width);
+    // An edge is at most a quarter of the tile, so layers never eat it.
+    let width =
+        |edge: Edge| px((bevel.as_f32() * edge.width).min(shortest * 0.25));
+
+    if let Some(ring) = look.ring {
+        let ring_width = width(ring);
+        if ring_width >= px(1.) {
+            window.paint_quad(quad(
+                bounds,
+                Corners::default(),
+                clear,
+                Edges::all(ring_width),
+                ring.color,
+                solid,
+            ));
+        }
+    }
+
+    // The four edges in as few quads as they allow: one per lit pair when
+    // top/left and bottom/right agree, otherwise one per side.
     let lit = Edges {
-        top: width,
+        top: width(look.top),
         right: px(0.),
         bottom: px(0.),
-        left: width,
+        left: width(look.left),
     };
     let shaded = Edges {
         top: px(0.),
-        right: width,
-        bottom: width,
+        right: width(look.right),
+        bottom: width(look.bottom),
         left: px(0.),
     };
-    // Only the border draws: the body is transparent, so the gradient below
-    // shows through the middle. Two quads, because one quad has one border
-    // colour and a bevel needs two; the edges are brighter and darker than
-    // the body, which is what makes the block read as a solid object.
-    let (highlight, shadow) = palette::cushion_edges(base);
+    if look.top == look.left && look.right == look.bottom {
+        window.paint_quad(quad(
+            bounds,
+            Corners::default(),
+            clear,
+            lit,
+            look.top.color,
+            solid,
+        ));
+        window.paint_quad(quad(
+            bounds,
+            Corners::default(),
+            clear,
+            shaded,
+            look.right.color,
+            solid,
+        ));
+    } else {
+        // Four different edges: one border quad each, so each side can carry
+        // its own colour, as a chiselled cut does.
+        paint_side(
+            window,
+            bounds,
+            clear,
+            Side::Top,
+            width(look.top),
+            look.top.color,
+            solid,
+        );
+        paint_side(
+            window,
+            bounds,
+            clear,
+            Side::Right,
+            width(look.right),
+            look.right.color,
+            solid,
+        );
+        paint_side(
+            window,
+            bounds,
+            clear,
+            Side::Bottom,
+            width(look.bottom),
+            look.bottom.color,
+            solid,
+        );
+        paint_side(
+            window,
+            bounds,
+            clear,
+            Side::Left,
+            width(look.left),
+            look.left.color,
+            solid,
+        );
+    }
+}
+
+/// Which side of a tile an edge quad fills.
+#[derive(Clone, Copy)]
+enum Side {
+    Top,
+    Right,
+    Bottom,
+    Left,
+}
+
+/// One side's border, drawn on its own so it can carry its own colour.
+fn paint_side(
+    window: &mut Window,
+    bounds: Bounds<Pixels>,
+    clear: Hsla,
+    side: Side,
+    width: Pixels,
+    color: Hsla,
+    solid: gpui_kit::BorderStyle,
+) {
+    if width < px(1.) {
+        return;
+    }
+    let zero = px(0.);
+    let edges = match side {
+        Side::Top => Edges {
+            top: width,
+            right: zero,
+            bottom: zero,
+            left: zero,
+        },
+        Side::Right => Edges {
+            top: zero,
+            right: width,
+            bottom: zero,
+            left: zero,
+        },
+        Side::Bottom => Edges {
+            top: zero,
+            right: zero,
+            bottom: width,
+            left: zero,
+        },
+        Side::Left => Edges {
+            top: zero,
+            right: zero,
+            bottom: zero,
+            left: width,
+        },
+    };
     window.paint_quad(quad(
         bounds,
         Corners::default(),
         clear,
-        lit,
-        highlight,
-        solid,
-    ));
-    window.paint_quad(quad(
-        bounds,
-        Corners::default(),
-        clear,
-        shaded,
-        shadow,
+        edges,
+        color,
         solid,
     ));
 }

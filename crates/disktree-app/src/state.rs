@@ -26,11 +26,11 @@ use disktree_core::treemap::{
     LayoutOptions, Rect, Tile, TileKind, hit, layout_filtered,
 };
 use gpui_kit::{
-    Context, FocusHandle, KeyDownEvent, MouseButton, MouseDownEvent,
-    MouseMoveEvent, NavigationDirection, Pixels, Point, Render, ScrollDelta,
-    ScrollWheelEvent, Size, Window, px, size,
+    AppContext as _, Context, Entity, FocusHandle, KeyDownEvent, MouseButton,
+    MouseDownEvent, MouseMoveEvent, NavigationDirection, Pixels, Point, Render,
+    ScrollDelta, ScrollWheelEvent, Size, Window, px, size,
 };
-use gpui_omarchy::Status;
+use gpui_omarchy::{ChoiceItem, ChoiceState, Status};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::git::GitState;
@@ -406,8 +406,12 @@ pub struct Disktree {
     pub crumb_menu: Option<CrumbMenu>,
 
     pub color_mode: ColorMode,
-    /// Draw tiles as raised blocks ([`treemap_view`]'s 3D look).
-    pub blocks_3d: bool,
+    /// How raised tiles are painted, from the picker in the legend row.
+    pub block_style: crate::palette::BlockStyle,
+    /// The block-style picker's state. Built on the first frame, which is the
+    /// first time a window is in hand; selection changes land in
+    /// [`Self::block_style`].
+    block_choice: Option<Entity<ChoiceState>>,
     /// Colour files by their extension, read from `disktree.ext.colors.txt`.
     /// The legend and the strip follow it too.
     pub ext_colors: bool,
@@ -523,7 +527,8 @@ impl Disktree {
             focus: cx.focus_handle(),
             crumb_menu: None,
             color_mode: ColorMode::Kind,
-            blocks_3d: false,
+            block_style: crate::palette::BlockStyle::default(),
+            block_choice: None,
             ext_colors: false,
             insights: Vec::new(),
             git: FxHashMap::default(),
@@ -1813,7 +1818,7 @@ impl Disktree {
             tiles: decorations,
             labels,
             view,
-            blocks_3d: self.blocks_3d,
+            block_style: self.block_style,
         }
     }
 
@@ -2024,9 +2029,66 @@ impl Disktree {
         }
     }
 
-    /// The *3D blocks* toggle: raised tiles instead of flat fills.
-    pub fn set_blocks_3d(&mut self, on: bool, cx: &mut Context<'_, Self>) {
-        self.blocks_3d = on;
+    /// The block-style picker's state, once the first frame has built it.
+    pub const fn block_choice(&self) -> Option<&Entity<ChoiceState>> {
+        self.block_choice.as_ref()
+    }
+
+    /// Build the block-style picker on the first frame, when a window is in
+    /// hand for the first time. Its selection lands in [`Self::block_style`].
+    pub fn ensure_block_choice(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.block_choice.is_some() {
+            return;
+        }
+        let items = crate::palette::BlockStyle::ALL
+            .iter()
+            .map(|style| {
+                ChoiceItem::new(style.value(), crate::i18n::t(style.label()))
+            })
+            .collect();
+        let start = crate::palette::BlockStyle::ALL
+            .iter()
+            .position(|style| *style == self.block_style)
+            .unwrap_or(0);
+        let choice = cx.new(|cx| {
+            ChoiceState::new(items, window, cx)
+                .label(crate::i18n::t("Block style"))
+                .placeholder(crate::i18n::t("Block style"))
+                .default_selected(start)
+        });
+        cx.observe(&choice, |this, choice, cx| {
+            let style =
+                choice.read(cx).selected().map_or(this.block_style, |item| {
+                    crate::palette::BlockStyle::from_value(&item.value)
+                });
+            if style != this.block_style {
+                this.block_style = style;
+                cx.notify();
+            }
+        })
+        .detach();
+        self.block_choice = Some(choice);
+    }
+
+    /// Set the block style directly. The tests drive the mosaic with it; the
+    /// picker itself goes through the observer in [`Self::ensure_block_choice`].
+    #[cfg(test)]
+    pub fn set_block_style(
+        &mut self,
+        style: crate::palette::BlockStyle,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.block_style = style;
+        if let Some(choice) = &self.block_choice {
+            let index = crate::palette::BlockStyle::ALL
+                .iter()
+                .position(|candidate| *candidate == style);
+            choice.update(cx, |choice, cx| choice.set_selected(index, cx));
+        }
         cx.notify();
     }
 
