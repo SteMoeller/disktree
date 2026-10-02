@@ -270,7 +270,7 @@ Mark or unmark the tile under the pointer (or the selection) so it can be remove
 Open the selected directory and draw what is inside it.=Open the selected directory and draw what is inside it.
 Go up one directory.=Go up one directory.
 Show the list of marked paths before anything is removed.=Show the list of marked paths before anything is removed.
-Move between the tiles at this level.=Move between the tiles at this level.
+Moves the selection between tiles - arrow keys or hjkl.=Moves the selection between tiles - arrow keys or hjkl.
 Filter by name; only matches keep their colour.=Filter by name; only matches keep their colour.
 Draw fewer or more levels of the tree at once.=Draw fewer or more levels of the tree at once.
 Rank and colour by size, file count or age.=Rank and colour by size, file count or age.

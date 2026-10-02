@@ -2118,7 +2118,11 @@ fn key_bar(
             "review",
             "Show the list of marked paths before anything is removed.",
         ),
-        ("hjkl", "move", "Move between the tiles at this level."),
+        (
+            "hjkl",
+            "move",
+            "Moves the selection between tiles - arrow keys or hjkl.",
+        ),
         (
             "/",
             "filter",
