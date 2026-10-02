@@ -26,7 +26,11 @@ use std::path::{Component, Path, PathBuf, Prefix};
 
 use windows_sys::Win32::Foundation::{
     ERROR_INVALID_FUNCTION, ERROR_INVALID_LEVEL, ERROR_INVALID_PARAMETER,
-    ERROR_NO_MORE_FILES, ERROR_NOT_SUPPORTED, INVALID_HANDLE_VALUE, MAX_PATH,
+    ERROR_NO_MORE_FILES, ERROR_NO_MORE_ITEMS, ERROR_NOT_SUPPORTED,
+    INVALID_HANDLE_VALUE, MAX_PATH,
+};
+use windows_sys::Win32::NetworkManagement::WNet::{
+    CONNECT_TEMPORARY, NETRESOURCEW, RESOURCETYPE_DISK, WNetAddConnection2W,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_HIDDEN,
@@ -38,6 +42,10 @@ use windows_sys::Win32::Storage::FileSystem::{
     FindVolumeClose, GetDiskFreeSpaceExW, GetDriveTypeW,
     GetFileInformationByHandleEx, GetLogicalDrives, GetVolumeInformationW,
     GetVolumePathNameW, GetVolumePathNamesForVolumeNameW, SYNCHRONIZE,
+};
+use windows_sys::Win32::System::Registry::{
+    HKEY, HKEY_CURRENT_USER, KEY_READ, RegCloseKey, RegEnumKeyExW,
+    RegOpenKeyExW, RegQueryValueExW,
 };
 
 use crate::space::SpaceInfo;
@@ -590,6 +598,9 @@ const DRIVE_REMOTE: u32 = 4;
 /// A dead share answers slowly, which is why the picker probes on a
 /// background thread.
 pub fn network_drives() -> Vec<PathBuf> {
+    // An elevated process is missing the user's mapped letters; bring them
+    // back before asking which letters exist.
+    restore_remembered_drives();
     let mut points = Vec::new();
     // SAFETY: takes no arguments and returns a bitmask of drives.
     let drives = unsafe { GetLogicalDrives() };
@@ -606,6 +617,197 @@ pub fn network_drives() -> Vec<PathBuf> {
         }
     }
     points
+}
+
+/// One drive letter the desktop remembers mapping to a share.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Remembered {
+    letter: char,
+    /// `F:`, as the mapping names the local end.
+    local: Vec<u16>,
+    /// `\\server\share`, the remote end.
+    remote: Vec<u16>,
+}
+
+/// Reconnect the user's remembered network drive mappings in this process's
+/// logon session.
+///
+/// Windows keeps a mapped drive in the logon session that made it. An
+/// elevated process runs in a separate session, so `GetLogicalDrives` does
+/// not report the user's letters there — the picker lost every mapped drive
+/// as soon as the app restarted as administrator — even though the shares
+/// stay reachable and the mappings are remembered for the user. Reconnecting
+/// those letters here, temporarily and only for this process, makes the
+/// drives show and scan again. A letter this process already has is left
+/// alone, so a normal session changes nothing.
+fn restore_remembered_drives() {
+    // SAFETY: takes no arguments and returns a bitmask of drives.
+    let connected = unsafe { GetLogicalDrives() };
+    for mapping in absent_letters(&remembered_mappings(), connected) {
+        let resource = NETRESOURCEW {
+            dwType: RESOURCETYPE_DISK,
+            lpLocalName: mapping.local.as_ptr().cast_mut(),
+            lpRemoteName: mapping.remote.as_ptr().cast_mut(),
+            ..NETRESOURCEW::default()
+        };
+        // SAFETY: the resource and both wide strings it points at outlive
+        // the call; a null password and username mean the credentials this
+        // user is already known by. The result is ignored on purpose: a
+        // share that cannot be reached is listed with no free space either
+        // way, and a rejection must not lose the letters that did work.
+        unsafe {
+            WNetAddConnection2W(
+                &raw const resource,
+                std::ptr::null(),
+                std::ptr::null(),
+                CONNECT_TEMPORARY,
+            );
+        }
+    }
+}
+
+/// The mappings whose letter `connected` does not have.
+///
+/// Split out so the decision can be tested without a share: a mapping is
+/// only reconnected when its letter is missing, which is exactly the
+/// elevated case.
+fn absent_letters(mappings: &[Remembered], connected: u32) -> Vec<&Remembered> {
+    mappings
+        .iter()
+        .filter(|mapping| {
+            let index = u32::from(mapping.letter).wrapping_sub(u32::from('A'));
+            index >= 26 || connected & (1 << index) == 0
+        })
+        .collect()
+}
+
+/// The user's remembered network drive mappings, the list `net use` and
+/// Explorer keep.
+///
+/// Read from `HKEY_CURRENT_USER\Network` rather than `WNetEnumResource`:
+/// that call reported no connections at all on a machine whose mappings
+/// `WNetGetConnection` resolves and `net use` lists, while the registry key
+/// holds them and the elevated token shares the user's hive, so an elevated
+/// process reads the same list. Empty when there are none or it cannot be
+/// read.
+fn remembered_mappings() -> Vec<Remembered> {
+    let subkey: Vec<u16> = "Network\0".encode_utf16().collect();
+    let mut network = std::ptr::null_mut();
+    // SAFETY: `HKEY_CURRENT_USER` is a predefined key handle; the subkey
+    // name is NUL-terminated and outlives the call; `network` is a live,
+    // writable out pointer.
+    let opened = unsafe {
+        RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            subkey.as_ptr(),
+            0,
+            KEY_READ,
+            &raw mut network,
+        )
+    };
+    if opened != 0 {
+        return Vec::new();
+    }
+    let mut mappings = Vec::new();
+    let mut index = 0;
+    loop {
+        let mut name = [0_u16; 64];
+        let mut length = u32::try_from(name.len()).unwrap_or(0);
+        // SAFETY: `network` is the open key; `name` is writable for the
+        // length passed; the class and time outputs are null, which the call
+        // accepts.
+        let result = unsafe {
+            RegEnumKeyExW(
+                network,
+                index,
+                name.as_mut_ptr(),
+                &raw mut length,
+                std::ptr::null(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+        if result == ERROR_NO_MORE_ITEMS {
+            break;
+        }
+        if result != 0 {
+            break;
+        }
+        index += 1;
+        let units = usize::try_from(length).unwrap_or(0);
+        if let Some(mapping) =
+            name.get(..units).and_then(|name| recording(network, name))
+        {
+            mappings.push(mapping);
+        }
+    }
+    // SAFETY: `network` is the key opened above, closed once.
+    unsafe { RegCloseKey(network) };
+    mappings
+}
+
+/// One remembered mapping, from a `Network` subkey named by its drive
+/// letter.
+fn recording(network: HKEY, name: &[u16]) -> Option<Remembered> {
+    let letter = char::from_u32(u32::from(*name.first()?))?;
+    if !letter.is_ascii_alphabetic() {
+        return None;
+    }
+    let remote = read_string(network, name, "RemotePath")?;
+    // Both ends are handed to `WNetAddConnection2W`, which wants them
+    // NUL-terminated, so each keeps its terminating NUL.
+    let local: Vec<u16> = format!("{letter}:\0").encode_utf16().collect();
+    Some(Remembered {
+        letter,
+        local,
+        remote,
+    })
+}
+
+/// The string value `value` of `parent`'s subkey `subkey`, NUL included.
+fn read_string(parent: HKEY, subkey: &[u16], value: &str) -> Option<Vec<u16>> {
+    let subkey: Vec<u16> =
+        subkey.iter().copied().chain(std::iter::once(0)).collect();
+    let mut key = std::ptr::null_mut();
+    // SAFETY: `parent` is an open key, the subkey name is NUL-terminated and
+    // outlives the call, and `key` is a live, writable out pointer.
+    let opened = unsafe {
+        RegOpenKeyExW(parent, subkey.as_ptr(), 0, KEY_READ, &raw mut key)
+    };
+    if opened != 0 {
+        return None;
+    }
+    let value: Vec<u16> =
+        value.encode_utf16().chain(std::iter::once(0)).collect();
+    let mut buffer = [0_u16; 512];
+    let mut bytes = u32::try_from(std::mem::size_of_val(&buffer)).unwrap_or(0);
+    // SAFETY: `key` is open; the value name is NUL-terminated and outlives
+    // the call; the buffer is writable for `bytes` bytes; the type output is
+    // not asked for, a null pointer being allowed.
+    let result = unsafe {
+        RegQueryValueExW(
+            key,
+            value.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null_mut(),
+            buffer.as_mut_ptr().cast(),
+            &raw mut bytes,
+        )
+    };
+    // SAFETY: `key` is the key opened above, closed once.
+    unsafe { RegCloseKey(key) };
+    if result != 0 {
+        return None;
+    }
+    let units = usize::try_from(bytes).unwrap_or(0) / 2;
+    // `REG_SZ` includes its terminating NUL; keep it, because the caller
+    // hands the value to `WNetAddConnection2W`, which wants one.
+    let mut remote: Vec<u16> = buffer[..units.min(buffer.len())].to_vec();
+    if remote.last() != Some(&0) {
+        remote.push(0);
+    }
+    (remote.len() > 1).then_some(remote)
 }
 
 /// The paths the volume named by the NUL-terminated `volume` is mounted at.
@@ -1006,20 +1208,58 @@ mod tests {
     /// mappings, so the loop simply does not run there.
     #[test]
     fn mapped_network_drives_are_offered() {
+        let offered = crate::space::volumes();
+        // Every mapping the user remembers is a row: a normal session already
+        // has the letter, and an elevated one gets it back from the
+        // remembered mapping. Nothing runs on a machine without mappings.
+        for mapping in remembered_mappings() {
+            let root = PathBuf::from(format!("{}:\\", mapping.letter));
+            assert!(
+                offered.iter().any(|volume| same(&volume.point, &root)),
+                "{} is not offered",
+                root.display()
+            );
+        }
         for point in network_drives() {
-            let offered = crate::space::volumes()
-                .into_iter()
+            let listed = offered
+                .iter()
                 .find(|volume| same(&volume.point, &point))
                 .unwrap_or_else(|| {
                     panic!("{} is not offered", point.display())
                 });
             assert_eq!(
-                offered.space.is_some(),
+                listed.space.is_some(),
                 space_info(&point).is_ok(),
                 "{} shows whatever the share reports",
                 point.display()
             );
         }
+    }
+
+    /// Only a letter the process is missing is reconnected: a normal session
+    /// already has its mapped drives and must be left untouched.
+    #[test]
+    fn only_missing_letters_are_reconnected() {
+        let mapping = |letter| Remembered {
+            letter,
+            local: Vec::new(),
+            remote: Vec::new(),
+        };
+        let mappings = [mapping('F'), mapping('M'), mapping('T')];
+        let bit = |letter: char| {
+            1_u32 << u32::from(letter).wrapping_sub(u32::from('A'))
+        };
+        let f_and_m = bit('F') | bit('M');
+        let absent: Vec<char> = absent_letters(&mappings, f_and_m)
+            .iter()
+            .map(|mapping| mapping.letter)
+            .collect();
+        assert_eq!(absent, ['T'], "only the letter this process lacks");
+        let all = f_and_m | bit('T');
+        assert!(
+            absent_letters(&mappings, all).is_empty(),
+            "a session with every letter reconnects nothing"
+        );
     }
 
     fn listed(dir: &Path) -> Vec<Entry> {
