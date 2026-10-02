@@ -141,6 +141,46 @@ fn the_block_style_and_the_extension_toggle_reach_the_mosaic(
     assert!(mosaic_is_ext_colour_free(&view, cx));
 }
 
+/// A style whose label is pushed in by an inner ring reserves that much more
+/// header band, so the pushed-in text still fits instead of being cut off by
+/// the band. The thicker the ring, the taller the band.
+#[gpui_kit::test]
+fn a_ring_style_grows_the_header_band(cx: &mut TestAppContext) {
+    use crate::palette::BlockStyle;
+
+    cx.update(gpui_omarchy::init);
+    let temp = fixture();
+    let (view, cx) = view_over(temp.path(), cx);
+    draw(cx);
+
+    let band = |view: &Entity<Disktree>, cx: &mut Window| {
+        update(view, cx, |app, _| {
+            app.layout();
+            (app.layout_options.header, app.layout_options.header_inner)
+        })
+    };
+    let flat = band(&view, cx);
+
+    update(&view, cx, |app, cx| {
+        app.set_block_style(BlockStyle::Neon, cx);
+    });
+    draw(cx);
+    let neon = band(&view, cx);
+    update(&view, cx, |app, cx| {
+        app.set_block_style(BlockStyle::Embossed, cx);
+    });
+    draw(cx);
+    let embossed = band(&view, cx);
+    assert!(
+        neon.0 > flat.0 && neon.1 > flat.1,
+        "a ring makes room: {flat:?} -> {neon:?}"
+    );
+    assert!(
+        embossed.1 > neon.1,
+        "the thicker ring reserves more: {neon:?} -> {embossed:?}"
+    );
+}
+
 /// No tile carries a configured file-type colour while the toggle is off.
 fn mosaic_is_ext_colour_free(view: &Entity<Disktree>, cx: &mut Window) -> bool {
     update(view, cx, |app, _| app.prepare())

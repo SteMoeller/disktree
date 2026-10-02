@@ -185,6 +185,19 @@ impl BlockStyle {
             .find(|style| style.value() == value)
             .unwrap_or_default()
     }
+
+    /// The inner ring's thickness, in bevel units, a label has to clear.
+    /// Zero for a style without a ring. The layout reserves this much on top
+    /// of a header band so the inset text still fits inside it.
+    pub const fn ring_bevels(self) -> f32 {
+        match self {
+            Self::Neon => 1.25,
+            Self::Anodized | Self::Prism => 1.0,
+            Self::Embossed => 3.0,
+            Self::Chiseled => 1.5,
+            Self::Classic | Self::Gloss | Self::Grain => 0.0,
+        }
+    }
 }
 
 /// One side of a tile's edge: how thick, in bevel units, and in what colour.
@@ -247,12 +260,15 @@ pub fn block_look(style: BlockStyle, base: Hsla) -> BlockLook {
             shadow: false,
         },
         BlockStyle::Gloss => BlockLook {
-            gradient: Some((160.0, light(0.6), dark(0.5))),
+            // A sheen that still shows the tile's own colour. The first
+            // version lit the top-left almost to white, so every tile read
+            // grey and no longer matched its legend swatch.
+            gradient: Some((160.0, light(0.35), dark(0.45))),
             body: base,
-            top: edge(1.5, light(0.9)),
-            left: edge(0.5, light(0.5)),
-            right: edge(0.5, dark(0.6)),
-            bottom: edge(1.5, dark(0.85)),
+            top: edge(1.5, light(0.55)),
+            left: edge(0.5, light(0.3)),
+            right: edge(0.5, dark(0.5)),
+            bottom: edge(1.5, dark(0.65)),
             ring: None,
             shadow: true,
         },
@@ -266,7 +282,7 @@ pub fn block_look(style: BlockStyle, base: Hsla) -> BlockLook {
             left: edge(0.75, glow),
             right: edge(0.75, glow),
             bottom: edge(0.75, glow),
-            ring: Some(edge(1.25, glow.opacity(0.35))),
+            ring: Some(edge(style.ring_bevels(), glow.opacity(0.35))),
             shadow: false,
         },
         BlockStyle::Anodized => BlockLook {
@@ -276,7 +292,7 @@ pub fn block_look(style: BlockStyle, base: Hsla) -> BlockLook {
             left: edge(1.0, light(0.7)),
             right: edge(2.0, dark(0.55)),
             bottom: edge(2.0, dark(0.75)),
-            ring: Some(edge(1.0, light(0.35))),
+            ring: Some(edge(style.ring_bevels(), light(0.35))),
             shadow: false,
         },
         BlockStyle::Embossed => BlockLook {
@@ -286,7 +302,7 @@ pub fn block_look(style: BlockStyle, base: Hsla) -> BlockLook {
             left: edge(1.0, light(0.3)),
             right: edge(1.0, dark(0.4)),
             bottom: edge(1.5, dark(0.55)),
-            ring: Some(edge(3.0, dark(0.5))),
+            ring: Some(edge(style.ring_bevels(), dark(0.5))),
             shadow: false,
         },
         BlockStyle::Grain => BlockLook {
@@ -307,7 +323,7 @@ pub fn block_look(style: BlockStyle, base: Hsla) -> BlockLook {
             left: edge(1.0, light(0.4)),
             right: edge(1.0, dark(0.4)),
             bottom: edge(1.75, dark(0.65)),
-            ring: Some(edge(1.5, black().opacity(0.25))),
+            ring: Some(edge(style.ring_bevels(), black().opacity(0.25))),
             shadow: false,
         },
         BlockStyle::Prism => BlockLook {
@@ -317,7 +333,7 @@ pub fn block_look(style: BlockStyle, base: Hsla) -> BlockLook {
             left: edge(1.0, light(0.6)),
             right: edge(1.0, dark(0.7)),
             bottom: edge(1.0, dark(0.85)),
-            ring: Some(edge(1.0, dark(0.25))),
+            ring: Some(edge(style.ring_bevels(), dark(0.25))),
             shadow: false,
         },
     }
@@ -619,6 +635,25 @@ mod tests {
                 "{style:?} has a light corner and needs dark text"
             );
         }
+    }
+
+    /// The gloss sheen must not wash the tile out to grey: its lit corner
+    /// keeps most of the tile's colour, so a tile still matches its legend
+    /// swatch.
+    #[test]
+    fn gloss_keeps_the_tile_colour() {
+        let base = Hsla {
+            h: 0.6,
+            s: 0.5,
+            l: 0.5,
+            a: 1.0,
+        };
+        let corner = block_look(BlockStyle::Gloss, base).top_left();
+        assert!(
+            corner.s > base.s * 0.55,
+            "the sheen keeps the tile's saturation: {corner:?}"
+        );
+        assert!((corner.h - base.h).abs() < 0.05, "and its hue: {corner:?}");
     }
 
     #[test]

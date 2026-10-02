@@ -1851,9 +1851,14 @@ impl Disktree {
     /// Tiles for the current root and viewport size, computed once per change.
     pub fn layout(&mut self) -> Option<&[Tile]> {
         // A 17 px band at the default rem, scaled so zoom keeps the band's
-        // relationship to the label inside it.
-        self.layout_options.header = HEADER_REMS * self.rem;
-        self.layout_options.header_inner = HEADER_INNER_REMS * self.rem;
+        // relationship to the label inside it. A style with an inner ring
+        // pushes its label that far in as well, so the band grows by the
+        // ring: without it the bottom of the text was cut off by the band.
+        let bevel = (self.rem * 0.125).max(1.0);
+        let ring = (bevel * self.block_style.ring_bevels()).round();
+        self.layout_options.header = HEADER_REMS.mul_add(self.rem, ring);
+        self.layout_options.header_inner =
+            HEADER_INNER_REMS.mul_add(self.rem, ring);
         // A filter is about the directory it was typed in: above it, it
         // would hide everything beside that directory, so it lapses.
         if self
