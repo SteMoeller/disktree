@@ -146,24 +146,35 @@ fn run() -> Result<()> {
             let root_for_app = root.clone();
             // Open centred in the work area of the monitor the app was
             // started on, rather than at a fixed global point that only ever
-            // lands on the primary monitor.
+            // lands on the primary monitor. The display has to be named as
+            // well: gpui checks the bounds against that display and silently
+            // replaces them with the display's default when they are not
+            // inside it, and without a display it uses the primary one.
             let wanted = size(px(1440.), px(900.));
-            let work = start_work_area()
-                .or_else(|| {
-                    cx.primary_display().map(|display| display.visible_bounds())
-                })
-                .unwrap_or_else(|| {
-                    gpui_kit::Bounds::new(
-                        gpui_kit::point(px(0.), px(0.)),
-                        wanted,
-                    )
-                });
+            let (display_id, work) = match start_work_area() {
+                Some((display_id, bounds)) => (Some(display_id), bounds),
+                None => (
+                    None,
+                    cx.primary_display().map_or_else(
+                        || {
+                            gpui_kit::Bounds::new(
+                                gpui_kit::point(px(0.), px(0.)),
+                                wanted,
+                            )
+                        },
+                        |display| display.visible_bounds(),
+                    ),
+                ),
+            };
             let window = cx
                 .open_window(
                     WindowOptions {
                         window_bounds: Some(gpui_kit::WindowBounds::Windowed(
                             centered_in(work, wanted),
                         )),
+                        // gpui resolves the bounds against this display; its
+                        // `DisplayId` is the monitor handle on Windows.
+                        display_id,
                         titlebar: Some(gpui_kit::TitlebarOptions {
                             title: Some(
                                 format!(
@@ -255,14 +266,16 @@ fn centered_in(
 /// resolved, so the caller falls back to the primary monitor.
 ///
 /// The rectangle and the DPI come straight from Win32, then divided the way
-/// gpui divides a display's, so the numbers are gpui's logical pixels without
-/// having to find the same display again by id.
+/// gpui divides a display's, so the numbers are gpui's logical pixels. The
+/// monitor handle is returned alongside, as the display gpui must place the
+/// window on: on Windows a gpui `DisplayId` is that handle.
 #[cfg(windows)]
 #[allow(
     unsafe_code,
     reason = "a handful of Win32 calls that only write into locals"
 )]
-fn start_work_area() -> Option<gpui_kit::Bounds<gpui_kit::Pixels>> {
+fn start_work_area()
+-> Option<(gpui_kit::DisplayId, gpui_kit::Bounds<gpui_kit::Pixels>)> {
     use gpui_kit::{Bounds, point, px, size};
     use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
     use windows_sys::Win32::Graphics::Gdi::{
@@ -298,6 +311,7 @@ fn start_work_area() -> Option<gpui_kit::Bounds<gpui_kit::Pixels>> {
     if monitor.is_null() {
         return None;
     }
+    let display_id = gpui_kit::DisplayId::new(monitor as u64);
 
     let mut info: MONITORINFO = unsafe { std::mem::zeroed() };
     info.cbSize = u32::try_from(std::mem::size_of::<MONITORINFO>()).ok()?;
@@ -334,16 +348,20 @@ fn start_work_area() -> Option<gpui_kit::Bounds<gpui_kit::Pixels>> {
     } = info.rcWork;
     let (left, top, right, bottom) =
         (left as f32, top as f32, right as f32, bottom as f32);
-    Some(Bounds::new(
-        point(px(left / scale), px(top / scale)),
-        size(px((right - left) / scale), px((bottom - top) / scale)),
+    Some((
+        display_id,
+        Bounds::new(
+            point(px(left / scale), px(top / scale)),
+            size(px((right - left) / scale), px((bottom - top) / scale)),
+        ),
     ))
 }
 
 /// Everything but Windows leaves placement to the platform, which centres
 /// the window on the primary display itself.
 #[cfg(not(windows))]
-fn start_work_area() -> Option<gpui_kit::Bounds<gpui_kit::Pixels>> {
+fn start_work_area()
+-> Option<(gpui_kit::DisplayId, gpui_kit::Bounds<gpui_kit::Pixels>)> {
     None
 }
 
