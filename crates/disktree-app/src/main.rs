@@ -27,7 +27,6 @@ mod views;
 mod widgets;
 
 use std::path::PathBuf;
-use std::rc::Rc;
 #[cfg(target_os = "macos")]
 use std::{
     io::IsTerminal as _,
@@ -37,7 +36,7 @@ use std::{
 
 use anyhow::{Context as _, Result};
 use disktree_core::scan::ScanOptions;
-use gpui_kit::{AppContext as _, PlatformDisplay, WindowOptions, px, size};
+use gpui_kit::{AppContext as _, WindowOptions, px, size};
 use state::Disktree;
 
 /// What the command line asked for.
@@ -131,15 +130,16 @@ fn run() -> Result<()> {
             // started on, rather than at a fixed global point that only ever
             // lands on the primary monitor.
             let wanted = size(px(1440.), px(900.));
-            let work = start_display(cx).map_or_else(
-                || {
+            let work = start_work_area()
+                .or_else(|| {
+                    cx.primary_display().map(|display| display.visible_bounds())
+                })
+                .unwrap_or_else(|| {
                     gpui_kit::Bounds::new(
                         gpui_kit::point(px(0.), px(0.)),
                         wanted,
                     )
-                },
-                |display| display.visible_bounds(),
-            );
+                });
             let window = cx
                 .open_window(
                     WindowOptions {
@@ -227,42 +227,106 @@ fn centered_in(
     )
 }
 
-/// The monitor the app was started on: the one under the pointer, so the
-/// window opens where the user is; the primary monitor when the platform
-/// cannot say.
-#[cfg(not(windows))]
-fn start_display(cx: &gpui_kit::App) -> Option<Rc<dyn PlatformDisplay>> {
-    cx.primary_display()
-}
-
-/// Windows: the cursor's monitor through Win32, matched to a GPUI display.
-/// A `DisplayId` holds the platform's `HMONITOR` there, which is exactly
-/// what `MonitorFromPoint` returns.
+/// The work area — the screen minus its taskbar — of the monitor disktree
+/// was started on, in logical pixels.
+///
+/// The launcher is what says where the user is: the console window the
+/// process was started from, when it has a visible one (Windows Terminal's
+/// is hidden, and reporting it would point at the wrong screen), else the
+/// window in front, else the pointer. `None` when none of them can be
+/// resolved, so the caller falls back to the primary monitor.
+///
+/// The rectangle and the DPI come straight from Win32, then divided the way
+/// gpui divides a display's, so the numbers are gpui's logical pixels without
+/// having to find the same display again by id.
 #[cfg(windows)]
 #[allow(
     unsafe_code,
-    reason = "two Win32 calls: one fills a point, one reads it"
+    reason = "a handful of Win32 calls that only write into locals"
 )]
-fn start_display(cx: &gpui_kit::App) -> Option<Rc<dyn PlatformDisplay>> {
-    use gpui_kit::DisplayId;
-    use windows_sys::Win32::Foundation::POINT;
+fn start_work_area() -> Option<gpui_kit::Bounds<gpui_kit::Pixels>> {
+    use gpui_kit::{Bounds, point, px, size};
+    use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
     use windows_sys::Win32::Graphics::Gdi::{
-        MONITOR_DEFAULTTONEAREST, MonitorFromPoint,
+        GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO,
+        MonitorFromPoint, MonitorFromWindow,
     };
-    use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+    use windows_sys::Win32::System::Console::GetConsoleWindow;
+    use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetCursorPos, GetForegroundWindow, IsWindowVisible,
+    };
 
-    let mut cursor = POINT { x: 0, y: 0 };
-    // SAFETY: `cursor` is ours and the call only writes into it.
-    if unsafe { GetCursorPos(&raw mut cursor) } == 0 {
-        return cx.primary_display();
-    }
-    // SAFETY: takes the point by value and returns an opaque handle.
-    let monitor = unsafe { MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST) };
+    // SAFETY: every call takes either nothing or an opaque handle Windows
+    // itself handed us, and each out pointer aims at a live local.
+    let monitor = unsafe {
+        let console: HWND = GetConsoleWindow();
+        let reference = if !console.is_null() && IsWindowVisible(console) != 0 {
+            Some(console)
+        } else {
+            let foreground = GetForegroundWindow();
+            (!foreground.is_null()).then_some(foreground)
+        };
+        if let Some(window) = reference {
+            MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST)
+        } else {
+            let mut cursor = POINT { x: 0, y: 0 };
+            if GetCursorPos(&raw mut cursor) == 0 {
+                return None;
+            }
+            MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST)
+        }
+    };
     if monitor.is_null() {
-        return cx.primary_display();
+        return None;
     }
-    cx.find_display(DisplayId::new(monitor as u64))
-        .or_else(|| cx.primary_display())
+
+    let mut info: MONITORINFO = unsafe { std::mem::zeroed() };
+    info.cbSize = u32::try_from(std::mem::size_of::<MONITORINFO>()).ok()?;
+    // SAFETY: `monitor` is live, and `info` is a live, writable MONITORINFO
+    // with the size the API asks to be set first.
+    if unsafe { GetMonitorInfoW(monitor, &raw mut info) } == 0 {
+        return None;
+    }
+
+    let (mut dpi_x, mut dpi_y) = (0_u32, 0_u32);
+    // SAFETY: `monitor` is live, the constant is the documented one, and both
+    // out pointers aim at live u32s.
+    let dpi = unsafe {
+        GetDpiForMonitor(
+            monitor,
+            MDT_EFFECTIVE_DPI,
+            &raw mut dpi_x,
+            &raw mut dpi_y,
+        )
+    };
+    // The same source gpui takes a display's scale factor from, so these are
+    // the logical pixels it expects; a failure falls back to 1:1.
+    let scale = if dpi == 0 && dpi_x > 0 {
+        dpi_x as f32 / 96.0
+    } else {
+        1.0
+    };
+
+    let RECT {
+        left,
+        top,
+        right,
+        bottom,
+    } = info.rcWork;
+    let (left, top, right, bottom) =
+        (left as f32, top as f32, right as f32, bottom as f32);
+    Some(Bounds::new(
+        point(px(left / scale), px(top / scale)),
+        size(px((right - left) / scale), px((bottom - top) / scale)),
+    ))
+}
+
+/// Everything but Windows leaves placement to the platform, which centres
+/// the window on the primary display itself.
+#[cfg(not(windows))]
+fn start_work_area() -> Option<gpui_kit::Bounds<gpui_kit::Pixels>> {
+    None
 }
 
 /// Read the command line, program name already skipped.
