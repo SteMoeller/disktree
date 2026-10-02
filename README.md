@@ -446,6 +446,68 @@ every size is on one `rem` scale so interface zoom keeps its proportions,
 primary is reserved for what Enter does, and the only question the app asks is
 the one it cannot take back.
 
+## On Windows 11
+
+This checkout was built and driven on Windows 11. Every change went through a
+self-written AI ticketing system, run as an MCP server inside opencode: a
+ticket is claimed, implemented against the strict `lint`/`test` gate, and left
+in review for a human to sign off. The series below is what came out of it —
+one line each, tickets in order.
+
+- **DISK-1 — Security audit.** A read-only review of the workspace for data
+  egress and unusual constructs. No telemetry, update checks or HTTP; the
+  first-party code does not leave the machine.
+- **DISK-2 — Windows build script.** `build.ps1` takes a fresh checkout to
+  `target\release\disktree.exe`, importing the MSVC environment and installing
+  Rust into a repo-local `.tools\` when it cannot go system-wide. One command,
+  no admin needed.
+- **DISK-3 — Volume list, zoom and language (i18n).** The bottom bar gained a
+  volume picker (`v`), interface zoom (`ctrl` `+`/`-`/`0`) and a language
+  picker, and the strings moved into `disktree.<lang>.i18n.txt`. Files are
+  looked up beside the executable, in the working directory, then under
+  `%APPDATA%\disktree`.
+- **DISK-4 — Raised blocks and file-type colours.** Optional raised 3D tiles
+  and colours per file extension from `disktree.ext.colors.txt`, switchable in
+  the legend row. A directory takes the colour of the extension holding the
+  most bytes beneath it.
+- **DISK-5 — Missing i18n keys.** The bottom-menu labels are looked up through
+  `t(variable)`, but the files only held the capitalised forms, so `mark`,
+  `open`, `up` and friends stayed English. The indirect keys are covered now.
+- **DISK-6 — Start monitor.** The window opens centred on the monitor disktree
+  was launched from — visible console, else foreground window, else pointer.
+  gpui also has to be told the display, or it snaps the window to the primary.
+- **DISK-7 — System language.** The first start follows the system language, so
+  a German Windows opens in German; the picker still overrides it.
+- **DISK-8 — Hover help.** Every command in the bottom bar has a hover help
+  text, in English and German.
+- **DISK-9 — Feature branch.** The ticket work lands on `feature/disk-series`,
+  one commit per ticket with English messages, so it can be forked as a whole.
+- **DISK-10 — Copy path.** A right-click on a tile copies the full path of that
+  directory or file.
+- **DISK-11 — Cloud placeholder audit.** A read-only finding: online-only
+  folders are recognised and skipped, but a file's `RECALL_ON_*` attribute was
+  read and then ignored. This is the basis for DISK-15.
+- **DISK-12 — Mapped drives in an admin run.** An elevated process has its own
+  logon session, so `GetLogicalDrives` loses the user's mapped letters and the
+  picker showed only local disks. It now reconnects the remembered
+  `HKCU\Network` mappings for that process, so they show and scan again.
+- **DISK-13 — Eight block styles.** A dropdown picks between eight ways to draw
+  a raised tile, each computed from the tile's own colour, with Classic the
+  flat default. The label band reserves a style's inner ring, and Gloss keeps
+  the base colour instead of washing it grey.
+- **DISK-14 — Arrow keys in help.** The hover help for "move" now names the
+  arrow keys as well as `hjkl`.
+- **DISK-15 — Cloud space.** Dehydrated files are evaluated per file, and the
+  space that is only in the cloud is carried as its own number beside the local
+  allocation. The selection panel shows a distinct "In the cloud" value, for
+  files and directories alike.
+- **DISK-16 — Sorted volume picker.** Volumes are listed by name (drive letter)
+  rather than by free space, and the volume being scanned carries a coloured
+  outline.
+- **DISK-17 — Faster admin start.** `-A`/`--administrator` elevates before any
+  scan begins, and `ctrl-shift-a` restarts as administrator from the first
+  frame instead of waiting for the walk to report errors.
+
 ## License
 
 MIT
