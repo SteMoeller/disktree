@@ -1147,6 +1147,13 @@ impl Table<'_> {
         if info.names > 1 {
             node.inode = Some((0, u64::from(entry.child)));
         }
+        // A dehydrated file costs nothing here; its logical size is what the
+        // cloud holds. See `windows::Entry::cloud_only`.
+        if !link && info.attributes & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS != 0
+        {
+            node.cloud_bytes = info.apparent;
+            node.cloud_files = 1;
+        }
         Ok(Some(node))
     }
 }

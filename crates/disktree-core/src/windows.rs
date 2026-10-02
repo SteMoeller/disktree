@@ -61,6 +61,14 @@ const NAME_SURROGATE: u32 = 0x2000_0000;
 const EVICTED: u32 =
     FILE_ATTRIBUTE_RECALL_ON_OPEN | FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS;
 
+/// Whether a kind and attribute pair means "only a cloud reference": a file
+/// whose data is not on the disk (`RECALL_ON_DATA_ACCESS`). Apart from
+/// [`Entry`] so it can be tested without a real placeholder.
+pub const fn is_cloud_only(kind: Kind, attributes: u32) -> bool {
+    matches!(kind, Kind::File)
+        && attributes & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS != 0
+}
+
 const EPOCH_TICKS: i64 = 116_444_736_000_000_000;
 const TICKS_PER_SECOND: i64 = 10_000_000;
 
@@ -147,6 +155,14 @@ impl Entry {
     /// disk does not: see [`EVICTED`].
     pub const fn evicted(&self) -> bool {
         matches!(self.kind, Kind::Directory) && self.attributes & EVICTED != 0
+    }
+
+    /// Whether the cloud provider keeps this file only in the cloud: its data
+    /// is not on the disk, so it costs nothing here. `RECALL_ON_DATA_ACCESS`
+    /// is what `OneDrive` sets on a dehydrated file; local or partial files do
+    /// not carry it.
+    pub const fn cloud_only(&self) -> bool {
+        is_cloud_only(self.kind, self.attributes)
     }
 
     /// `(volume serial, file id)`: the same for two names of one file.
@@ -955,6 +971,20 @@ mod tests {
         assert_eq!(quote(r"C:\Program Files\x"), r#""C:\Program Files\x""#);
         assert_eq!(quote(r#"a\"b"#), r#""a\\\"b""#);
         assert_eq!(quote("--metric"), r#""--metric""#);
+    }
+
+    #[test]
+    fn a_dehydrated_file_is_a_cloud_reference() {
+        assert!(is_cloud_only(
+            Kind::File,
+            FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS
+        ));
+        assert!(!is_cloud_only(Kind::File, 0));
+        // A directory with the same bit is `evicted`'s business, not this.
+        assert!(!is_cloud_only(
+            Kind::Directory,
+            FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS
+        ));
     }
 
     #[test]

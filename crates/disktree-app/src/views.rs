@@ -1349,6 +1349,45 @@ fn selection_section(
         );
         widgets::figure(crate::i18n::t("Kind"), kind, theme.bright, cx)
     };
+    // A cloud subtree: the space it holds that is not on the disk, set as a
+    // value of its own next to the local figures instead of a footnote, for
+    // a file and for a directory alike. The synced category's colour keeps
+    // it apart from the neutral local figures without borrowing the amber
+    // that means selection.
+    let cloud = (node.cloud_files > 0).then(|| {
+        let local = if app.options.apparent_size {
+            node.bytes.saturating_sub(node.cloud_bytes)
+        } else {
+            node.bytes
+        };
+        let color = palette::category_accent(theme, Category::Synced);
+        div()
+            .flex()
+            .flex_col()
+            .gap(space::XXS)
+            .px(space::SM)
+            .py(space::XS)
+            .border_1()
+            .border_color(color.opacity(0.5))
+            .child(widgets::figure(
+                crate::i18n::t("In the cloud"),
+                human_bytes(node.cloud_bytes),
+                color,
+                cx,
+            ))
+            .child(
+                div()
+                    .text_size(text::CAPTION)
+                    .text_color(theme.secondary)
+                    .child(crate::i18n::tf(
+                        "{0} files \u{00b7} {1} on disk",
+                        &[
+                            &widgets::human_count(node.cloud_files),
+                            &human_bytes(local),
+                        ],
+                    )),
+            )
+    });
     let grid = div()
         .flex()
         .flex_col()
@@ -1381,7 +1420,8 @@ fn selection_section(
                     cx,
                 )))
                 .child(div().flex_1().min_w_0().child(fourth)),
-        );
+        )
+        .children(cloud);
 
     // Only states that change the decision earn a badge.
     let mut chips = Vec::new();

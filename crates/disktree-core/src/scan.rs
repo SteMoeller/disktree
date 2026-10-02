@@ -525,6 +525,9 @@ struct Facts {
     /// The file may have another name the walk could meet: its identity is
     /// worth keeping for hardlink de-duplication.
     shared: bool,
+    /// `Some(logical size)` when a cloud provider keeps the file only in the
+    /// cloud, so its bytes are not on the disk; `None` for everything else.
+    cloud: Option<u64>,
 }
 
 impl Facts {
@@ -534,6 +537,7 @@ impl Facts {
             identity: file_identity(meta),
             modified: modified_seconds(meta),
             shared: shares_inode(meta),
+            cloud: None,
         }
     }
 }
@@ -620,6 +624,9 @@ impl Listed for crate::windows::Entry {
             // The listing has no link count; a file id is free here, so
             // every file keeps one.
             shared: true,
+            // A placeholder costs nothing here; its logical size is what the
+            // cloud holds, kept apart from the measured bytes.
+            cloud: self.cloud_only().then(|| self.apparent()),
         })
     }
 
@@ -731,6 +738,8 @@ impl PendingDir {
             own_bytes: 0,
             files: 0,
             own_files: 0,
+            cloud_bytes: 0,
+            cloud_files: 0,
             dirs: 1,
             inode: None,
             read_error: self.read_error.load(Ordering::Relaxed),
@@ -1013,6 +1022,10 @@ fn leaf_node(
         node.inode = facts.identity;
     }
     node.modified = facts.modified;
+    if let Some(cloud) = facts.cloud {
+        node.cloud_bytes = cloud;
+        node.cloud_files = 1;
+    }
     node
 }
 

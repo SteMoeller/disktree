@@ -72,6 +72,14 @@ pub struct Node {
     /// Files directly in this directory; `1` for a file. Derived by
     /// [`aggregate`].
     pub own_files: u64,
+    /// Bytes that live only in the cloud: the logical size of entries a cloud
+    /// provider keeps as a reference (`OneDrive` placeholders seen as
+    /// `RECALL_ON_DATA_ACCESS`). Kept apart from [`Self::bytes`], which is
+    /// what the disk holds.
+    pub cloud_bytes: u64,
+    /// Files at or beneath this node that are only a cloud reference. Derived
+    /// by [`aggregate`].
+    pub cloud_files: u64,
     /// Directories at or beneath this node; `1` for a directory.
     pub dirs: u64,
     /// `(device, inode)` for files, used to de-duplicate hardlinks.
@@ -104,6 +112,8 @@ impl Node {
             own_bytes: 0,
             files: 0,
             own_files: 0,
+            cloud_bytes: 0,
+            cloud_files: 0,
             dirs: 1,
             inode: None,
             read_error: false,
@@ -127,6 +137,8 @@ impl Node {
             own_bytes: bytes,
             files: u64::from(kind == NodeKind::File),
             own_files: u64::from(kind == NodeKind::File),
+            cloud_bytes: 0,
+            cloud_files: 0,
             dirs: 0,
             inode: None,
             read_error: false,
@@ -337,6 +349,9 @@ fn aggregate_at(
             && !seen.insert(key)
         {
             node.own_bytes = 0;
+            // The duplicate's cloud reference is not counted twice either.
+            node.cloud_bytes = 0;
+            node.cloud_files = 0;
         }
         node.bytes = node.own_bytes;
         node.files = node.own_files;
@@ -348,6 +363,8 @@ fn aggregate_at(
     let mut files = 0;
     let mut own_bytes = 0;
     let mut own_files = 0;
+    let mut cloud_bytes = 0;
+    let mut cloud_files = 0;
     let mut dirs: u64 = 1;
     let mut modified = 0;
     if depth < PARALLEL_LEVELS {
@@ -365,6 +382,8 @@ fn aggregate_at(
         bytes = child.bytes.saturating_add(bytes);
         files += child.files;
         dirs += child.dirs;
+        cloud_bytes = child.cloud_bytes.saturating_add(cloud_bytes);
+        cloud_files += child.cloud_files;
         if !child.is_dir() {
             own_bytes = child.bytes.saturating_add(own_bytes);
             own_files += child.files;
@@ -374,6 +393,8 @@ fn aggregate_at(
     node.files = files;
     node.own_bytes = own_bytes;
     node.own_files = own_files;
+    node.cloud_bytes = cloud_bytes;
+    node.cloud_files = cloud_files;
     node.dirs = dirs;
     node.modified = modified;
 
@@ -557,5 +578,20 @@ mod tests {
         root.children.push(nested);
         assert_eq!(root.depth(), 2);
         assert_eq!(leaf("x", 0).depth(), 0);
+    }
+
+    #[test]
+    fn cloud_references_are_counted_apart_from_disk_bytes() {
+        let mut root = Node::directory("root");
+        root.children.push(leaf("local", 1_000));
+        let mut only_cloud = leaf("remote", 0);
+        only_cloud.cloud_bytes = 5_000;
+        only_cloud.cloud_files = 1;
+        root.children.push(only_cloud);
+
+        aggregate(&mut root, Metric::Bytes);
+        assert_eq!(root.bytes, 1_000, "the disk holds only the local file");
+        assert_eq!(root.cloud_bytes, 5_000);
+        assert_eq!(root.cloud_files, 1);
     }
 }
