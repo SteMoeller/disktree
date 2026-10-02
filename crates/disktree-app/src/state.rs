@@ -19,7 +19,7 @@ use disktree_core::removal::{
 };
 use disktree_core::scan::{Known, ScanHandle, ScanOptions, ScanSnapshot};
 use disktree_core::space::{
-    SpaceInfo, device_for, space_info, volume_root_for,
+    SpaceInfo, Volume, device_for, space_info, volume_root_for,
 };
 use disktree_core::tree::{Metric, Node, path_of};
 use disktree_core::treemap::{
@@ -673,6 +673,7 @@ impl Disktree {
             // current volume removed, a two-drive machine was left with a
             // one-row picker after the first choice, with nothing for the
             // arrows to move to.
+            sort_volumes_by_name(&mut volumes);
             volumes
         });
         cx.spawn(async move |this, cx| {
@@ -3116,6 +3117,13 @@ const HEADER_REMS: f32 = 1.375;
 
 /// Height of the slim label row a deeper open directory keeps, in rem.
 const HEADER_INNER_REMS: f32 = 1.0;
+
+/// Volumes in the picker are listed by name, so a drive letter sits where
+/// the eye looks for it instead of wherever its free space happens to place
+/// it. Case does not matter, as Windows compares drive letters.
+pub fn sort_volumes_by_name(volumes: &mut [Volume]) {
+    volumes.sort_by_key(|volume| volume.point.to_string_lossy().to_lowercase());
+}
 
 /// A trail step's label: the directory's own name, or `/` for the root.
 fn crumb_label(path: &Path) -> String {

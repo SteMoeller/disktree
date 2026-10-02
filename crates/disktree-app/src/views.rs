@@ -145,8 +145,12 @@ fn volumes_dialog(
             cx,
         ));
     }
+    // The volume being scanned, so its row can be outlined apart from the
+    // row the keys are on.
+    let current = disktree_core::space::volume_root_for(&app.root_path);
     for (index, volume) in app.volumes.iter().enumerate() {
         let highlighted = index == app.volume_highlight;
+        let is_current = current.as_deref() == Some(volume.point.as_path());
         let free = volume.space.map_or_else(
             || crate::i18n::t("unknown free").to_string(),
             |space| {
@@ -173,6 +177,19 @@ fn volumes_dialog(
                     theme.bright
                 } else {
                     theme.foreground
+                })
+                // Every row carries the 1 px border so the outline does not
+                // shift the text; only the scanned volume colours it. Green
+                // is neither the key highlight's tint nor the accent, so it
+                // cannot read as a second selection.
+                .border_1()
+                .border_color(if is_current {
+                    theme.success
+                } else {
+                    theme.foreground.opacity(0.0)
+                })
+                .when(is_current, |row| {
+                    row.debug_selector(|| "volume-current".into())
                 })
                 // Only the row the keys are on is tinted: a second highlight
                 // would read as a second selection.

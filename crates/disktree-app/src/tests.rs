@@ -636,6 +636,79 @@ fn the_volume_picker_opens_moves_and_closes(cx: &mut TestAppContext) {
     assert_eq!(read(&view, cx, |app| app.root_path.clone()), before);
 }
 
+/// The picker lists drives by name, not by free space, so a letter is where
+/// the eye expects it.
+#[test]
+fn volume_rows_are_sorted_by_name() {
+    let volume = |point: &str| Volume {
+        point: PathBuf::from(point),
+        device: None,
+        space: None,
+    };
+    let mut volumes = vec![
+        volume("F:\\"),
+        volume("C:\\"),
+        volume("T:\\"),
+        volume("D:\\"),
+    ];
+    crate::state::sort_volumes_by_name(&mut volumes);
+    let names: Vec<String> = volumes
+        .iter()
+        .map(|volume| volume.point.display().to_string())
+        .collect();
+    assert_eq!(names, ["C:\\", "D:\\", "F:\\", "T:\\"]);
+    // Case is ignored, as Windows compares drive letters.
+    let mut mixed = vec![volume("c:\\"), volume("B:\\")];
+    crate::state::sort_volumes_by_name(&mut mixed);
+    assert_eq!(mixed[0].point, PathBuf::from("B:\\"));
+}
+
+/// The scanned volume's row is outlined, so it can be told apart from the
+/// row the keys are on. A list without the scanned volume shows no outline.
+#[gpui_kit::test]
+fn the_volume_picker_outlines_the_scanned_volume(cx: &mut TestAppContext) {
+    cx.update(gpui_omarchy::init);
+    let temp = fixture();
+    let (view, cx) = view_over(temp.path(), cx);
+    let root = read(&view, cx, |app| app.root_path.clone());
+    let current = disktree_core::space::volume_root_for(&root)
+        .expect("the scanned root lives on a volume");
+    update(&view, cx, |app, _| {
+        app.volumes = vec![
+            Volume {
+                point: PathBuf::from("X:\\not-here"),
+                device: None,
+                space: None,
+            },
+            Volume {
+                point: current,
+                device: None,
+                space: None,
+            },
+        ];
+        app.volumes_open = true;
+        app.volumes_loading = false;
+    });
+    draw(cx);
+    assert!(
+        cx.debug_bounds("volume-current").is_some(),
+        "the scanned volume is outlined"
+    );
+
+    update(&view, cx, |app, _| {
+        app.volumes = vec![Volume {
+            point: PathBuf::from("X:\\not-here"),
+            device: None,
+            space: None,
+        }];
+    });
+    draw(cx);
+    assert!(
+        cx.debug_bounds("volume-current").is_none(),
+        "no scanned volume in the list, no outline"
+    );
+}
+
 /// Enter must reach the picker even when its dialog owns keyboard focus.
 #[gpui_kit::test]
 fn enter_in_the_focused_volume_picker_scans_the_selected_root(
