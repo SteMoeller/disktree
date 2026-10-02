@@ -13,249 +13,50 @@
 # violet, text blue, web and code cyan, office rose, archives yellow, fonts
 # magenta, executables slate, databases olive, games indigo.
 
+# disktree file-type colours - reduced to 4 most important per category.
+
 # --- Images -----------------------------------------------------------
 jpg=#e8843c
-jpeg=#e8843c
-jfif=#e8843c
 png=#f4a93a
-apng=#f4a93a
-gif=#f2c13c
-bmp=#e0a050
-tif=#d98a2b
-tiff=#d98a2b
-webp=#ff9e4a
-heic=#efa13c
-heif=#efa13c
-avif=#f0a24b
-svg=#ffb347
-ico=#e8a63c
-psd=#c46a1e
-ai=#c46a1e
-xcf=#d07f30
-raw=#c97a2b
-cr2=#c97a2b
-cr3=#c97a2b
-nef=#bf7326
-orf=#bf7326
-rw2=#c97a2b
-arw=#b96e20
-raf=#b96e20
-dng=#d0842f
 
 # --- Music ------------------------------------------------------------
 mp3=#1fa37b
 m4a=#1fa37b
-aac=#2fb08a
-wav=#27b98c
 flac=#16a085
-oga=#3fc29b
-ogg=#3fc29b
-opus=#35cc9e
-wma=#17916f
-aif=#2aa47c
-aiff=#2aa47c
-alac=#2aa47c
-mid=#35cc9e
-midi=#35cc9e
-ape=#128a68
-dsf=#128a68
-wv=#128a68
 
 # --- Video ------------------------------------------------------------
 mp4=#7a4fd0
-m4v=#7a4fd0
 mkv=#8a5ce0
 avi=#6a3fc0
 mov=#9b6bea
-wmv=#5e38b0
-webm=#a77bf0
-mpg=#6e45c8
-mpeg=#6e45c8
-flv=#5532a0
-ts=#8f63e2
-m2ts=#8f63e2
-mts=#8f63e2
-3gp=#7f55d8
-vob=#4e2c96
-rm=#6740bb
-rmvb=#6740bb
-divx=#5e38b0
 
 # --- Text and documents ----------------------------------------------
-txt=#3e7bd6
-text=#3e7bd6
-md=#4a88e0
-markdown=#4a88e0
 pdf=#c0392b
-epub=#2c86b8
-mobi=#2c86b8
-azw3=#2c86b8
-djvu=#34619e
-tex=#2f9bd6
 log=#5c7a9e
-csv=#1f9e8a
-tsv=#2a8f8a
-srt=#3fb0c0
-vtt=#3fb0c0
-ass=#3fb0c0
-sub=#3fb0c0
-m3u=#2fb0a8
-m3u8=#2fb0a8
-pls=#2fb0a8
-cue=#2fb0a8
-
-# --- Web --------------------------------------------------------------
-html=#0fb5c9
-htm=#0fb5c9
-css=#12a5d8
-scss=#12a5d8
-sass=#12a5d8
-less=#12a5d8
-js=#3fa9e0
-mjs=#3fa9e0
-cjs=#3fa9e0
-jsx=#3fa9e0
-tsx=#1e88d0
-php=#6f8fd6
-vue=#2fa8a0
-svelte=#b03a2b
-
-# --- Source code ------------------------------------------------------
-py=#4fa3c8
-pyc=#3f8fa8
-rs=#d08a5a
-java=#b0724a
-kt=#8a6fd0
-c=#6f9fc0
-h=#6f9fc0
-cpp=#5f8fb0
-hpp=#5f8fb0
-cc=#5f8fb0
-cs=#7f6fc0
-go=#4fc0d0
-rb=#c05a5a
-swift=#e08a4a
-sh=#4a8a5a
-bash=#4a8a5a
-zsh=#4a8a5a
-ps1=#3a6fc4
-bat=#3a6fc4
-cmd=#3a6fc4
-sql=#c0a04a
-lua=#6a7fd0
-r=#3f7fc0
-dart=#40a0b0
-scala=#c04a4a
-hs=#7f6fc0
-ex=#6a5acd
-exs=#6a5acd
-jl=#9558b2
-zig=#e0a040
 
 # --- Office -----------------------------------------------------------
-doc=#b03a5b
 docx=#b03a5b
-odt=#c04a68
-rtf=#a03a58
-pages=#b85070
-xls=#217346
 xlsx=#217346
-ods=#2a9e58
-numbers=#2a9e58
-ppt=#d24726
 pptx=#d24726
-odp=#e06a3a
-key=#d24726
-one=#7a4fd0
-vsd=#3955a3
-vsdx=#3955a3
-mdb=#a02a4a
-accdb=#a02a4a
+pdf=#c0392b
 
 # --- Archives and disk images ----------------------------------------
 zip=#c9a227
 rar=#b08a1e
 7z=#a67c1a
 tar=#d0b040
-gz=#c0a030
-tgz=#c0a030
-bz2=#a89020
-xz=#b09828
-zst=#b8a030
-lz4=#a89020
-cab=#c0a030
-iso=#8c7a2a
-img=#8c7a2a
-dmg=#8c7a2a
-vhd=#7a6a22
-vhdx=#7a6a22
-wim=#7a6a22
-jar=#c9a227
-apk=#6fae3a
-deb=#a02a5a
-rpm=#b0303a
-msi=#7a8a9a
-appimage=#5a6a7a
-torrent=#4a8a5a
-part=#6a6a6a
-crdownload=#6a6a6a
-tmp=#6a6a6a
-
-# --- Fonts ------------------------------------------------------------
-ttf=#b54fc0
-otf=#a63fb0
-woff=#c05fd0
-woff2=#c05fd0
-eot=#8f3a9a
-fon=#8f3a9a
 
 # --- Executables and binaries ----------------------------------------
 exe=#5a6a7a
 dll=#4a5a6a
-sys=#3a4a5a
-com=#5a6a7a
-scr=#5a6a7a
-so=#6a7a8a
-dylib=#6a7a8a
-bin=#4a5a6a
-o=#59697a
-a=#59697a
-lib=#59697a
-pdb=#3a4a5a
-dat=#5a6a7a
-pak=#3f4f8f
-uasset=#4f5f9f
-umap=#4f5f9f
 
 # --- Databases and data ----------------------------------------------
 db=#7a8a3a
 sqlite=#8a9a4a
-sqlite3=#8a9a4a
-mdf=#6a7a2a
-ldf=#5a6a22
-parquet=#6a8a4a
-avro=#5a7a3a
-orc=#6a8a4a
+sql=#c0a04a
 bak=#8a8a6a
-bkp=#8a8a6a
 
 # --- 3D, models and game assets --------------------------------------
 blend=#4f5f9f
-fbx=#5f6faf
-obj=#6f7fbf
 stl=#7f8fcf
-gltf=#4f6fdf
-glb=#4f6fdf
-dae=#5f7fcf
-3ds=#6f5faf
-max=#5f4f9f
-c4d=#6f5faf
 
-# --- Keys and certificates -------------------------------------------
-pem=#8aa020
-crt=#7a9018
-cer=#7a9018
-pfx=#6a8010
-p12=#6a8010
-gpg=#8aa020
-asc=#7a9018
