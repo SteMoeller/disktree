@@ -669,15 +669,29 @@ pub fn volumes() -> Vec<Volume> {
 
 /// Every place a volume is mounted that can be scanned.
 ///
-/// Drive roots such as `D:\` and folders a volume is mounted on. Unready
-/// drives (an empty card reader reports a path but no space) are left out,
-/// since there is nothing to measure there.
+/// Drive roots such as `D:\` and folders a volume is mounted on. A mapped
+/// share that cannot answer right now — asleep, or waiting for credentials —
+/// is still offered, with no free space to show, rather than left out: the
+/// same drive must not come and go with a share's mood.
 #[cfg(windows)]
 pub fn volumes() -> Vec<Volume> {
     let mut points = crate::windows::mount_points();
     // Mapped shares and removable media have no volume GUID, so they are
     // found by drive letter instead.
     points.extend(crate::windows::network_drives());
+    volumes_from(points, &space_info)
+}
+
+/// [`volumes`] over a list of mount points, with `space` asked for each.
+///
+/// Split out so a test can hand it a share that cannot be read: a point whose
+/// free space is unknown is listed with `space: None`, which the picker shows
+/// as "unknown free".
+#[cfg(windows)]
+fn volumes_from(
+    points: Vec<PathBuf>,
+    space: &dyn Fn(&Path) -> io::Result<SpaceInfo>,
+) -> Vec<Volume> {
     let mut volumes: Vec<Volume> = Vec::new();
     for point in points {
         // A removable disk appears in both lists; keep it once. Drive letters
@@ -691,13 +705,12 @@ pub fn volumes() -> Vec<Volume> {
         if seen {
             continue;
         }
-        if let Ok(space) = space_info(&point) {
-            volumes.push(Volume {
-                point,
-                device: None,
-                space: Some(space),
-            });
-        }
+        let free = space(&point).ok();
+        volumes.push(Volume {
+            point,
+            device: None,
+            space: free,
+        });
     }
     sort_by_free_space(&mut volumes);
     volumes
@@ -868,6 +881,36 @@ portal /run/user/1000/doc fuse.portal rw 0 0
             names,
             ["full", "nearly-full", "roomy", "unknown"].map(PathBuf::from)
         );
+    }
+
+    /// A share that cannot be read right now is offered anyway, with no free
+    /// space: the picker shows it as "unknown free" instead of losing the row.
+    #[cfg(windows)]
+    #[test]
+    fn a_mount_point_without_readable_space_is_still_offered() {
+        let points = vec![PathBuf::from("Y:\\"), PathBuf::from("Z:\\")];
+        let volumes = volumes_from(points, &|point: &Path| {
+            if point.as_os_str() == "Y:\\" {
+                Err(io::Error::from(io::ErrorKind::NotFound))
+            } else {
+                Ok(SpaceInfo {
+                    total: 100,
+                    free: 50,
+                    available: 50,
+                })
+            }
+        });
+        assert_eq!(volumes.len(), 2, "neither point is dropped: {volumes:?}");
+        let unknown = volumes
+            .iter()
+            .find(|volume| volume.point.as_os_str() == "Y:\\")
+            .expect("the unreadable share is listed");
+        assert!(unknown.space.is_none(), "nothing to show for it");
+        let known = volumes
+            .iter()
+            .find(|volume| volume.point.as_os_str() == "Z:\\")
+            .expect("the readable share is listed");
+        assert_eq!(known.space.map(|space| space.available), Some(50));
     }
 
     #[test]

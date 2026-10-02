@@ -970,6 +970,28 @@ mod tests {
         );
     }
 
+    /// Every mapped network drive the desktop reports is offered by the
+    /// picker, with the share's free space when it answers and as "unknown
+    /// free" when it does not. Nothing to check on a machine without
+    /// mappings, so the loop simply does not run there.
+    #[test]
+    fn mapped_network_drives_are_offered() {
+        for point in network_drives() {
+            let offered = crate::space::volumes()
+                .into_iter()
+                .find(|volume| same(&volume.point, &point))
+                .unwrap_or_else(|| {
+                    panic!("{} is not offered", point.display())
+                });
+            assert_eq!(
+                offered.space.is_some(),
+                space_info(&point).is_ok(),
+                "{} shows whatever the share reports",
+                point.display()
+            );
+        }
+    }
+
     fn listed(dir: &Path) -> Vec<Entry> {
         let mut entries: Vec<Entry> = read_dir(dir, None)
             .expect("list")
