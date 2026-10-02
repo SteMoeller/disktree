@@ -1867,6 +1867,12 @@ fn restart_arguments_parse_back_to_the_same_scan() {
         include_hidden: false,
         one_filesystem: false,
         metric: Metric::Files,
+        threads: disktree_core::scan_threads::ScanThreads {
+            max_threads: 8,
+            adaptive: true,
+            retained_throughput: 0.85,
+            system_cpu_limit: Some(0.70),
+        },
         ..ScanOptions::default()
     };
     for (options, depth) in [(changed, 5), (ScanOptions::default(), 1)] {
@@ -1875,6 +1881,18 @@ fn restart_arguments_parse_back_to_the_same_scan() {
         assert_eq!(parsed.root, root);
         assert_eq!(parsed.depth, depth);
         let got = &parsed.options;
+        assert_eq!(got.threads.max_threads, options.threads.max_threads);
+        assert_eq!(got.threads.adaptive, options.threads.adaptive);
+        assert!(
+            (got.threads.retained_throughput
+                - options.threads.retained_throughput)
+                .abs()
+                < f64::EPSILON
+        );
+        assert_eq!(
+            got.threads.system_cpu_limit,
+            options.threads.system_cpu_limit
+        );
         assert_eq!(
             (
                 got.apparent_size,
@@ -1915,4 +1933,128 @@ fn the_administrator_flag_is_parsed() {
     let plain =
         crate::parse_args([root.into_os_string()].into_iter()).expect("parses");
     assert!(!plain.administrator, "off unless asked");
+}
+
+#[gpui_kit::test]
+fn power_efficiency_menu_saves_without_discarding_the_tree(
+    cx: &mut TestAppContext,
+) {
+    use crate::power::{self, PowerEfficiency as Power};
+    use gpui_kit::Modifiers;
+
+    cx.update(gpui_omarchy::init);
+    let temp = fixture();
+    let config = tempfile::tempdir().expect("config");
+    let path = config.path().join("power-efficiency");
+    let (view, cx) = view_over(temp.path(), cx);
+    cx.simulate_resize(gpui_kit::size(px(900.), px(600.)));
+    update(&view, cx, |app, _| {
+        app.power_settings_path = Some(path.clone());
+        // Enough CPUs that every preset is offered, whatever runs the test.
+        app.cpu_threads = 18;
+    });
+    let epoch = read(&view, cx, |app| app.scan_epoch);
+    for preset in Power::ALL {
+        draw(cx);
+        let button = cx.debug_bounds("power-efficiency").expect("control");
+        cx.simulate_click(button.center(), Modifiers::none());
+        draw(cx);
+        let choice = cx.debug_bounds(preset.key()).expect("preset");
+        cx.simulate_click(choice.center(), Modifiers::none());
+        draw(cx);
+        assert_eq!(power::load(&path).expect("saved"), preset);
+        read(&view, cx, |app| {
+            assert_eq!(app.power_choice, Some(preset));
+            assert_eq!(
+                app.options.threads.max_threads,
+                preset.threads(app.cpu_threads)
+            );
+            assert!(!app.options.threads.adaptive);
+            assert!(app.power_menu.is_none());
+            assert_eq!(app.scan_epoch, epoch);
+            assert!(app.tree.is_some());
+        });
+    }
+    // Persistence failure must not masquerade as a saved preference.
+    update(&view, cx, |app, cx| {
+        app.power_settings_path = Some(config.path().to_owned());
+        app.set_power_efficiency(Power::Miser, cx);
+    });
+    assert!(read(&view, cx, |app| app.notice.as_ref().is_some_and(
+        |(message, _)| message.contains("could not be saved")
+    )));
+    update(&view, cx, Disktree::start_scan);
+    assert_eq!(read(&view, cx, |app| app.scan_epoch), epoch + 1);
+}
+
+#[gpui_kit::test]
+fn the_power_menu_offers_only_what_the_cpus_can_tell_apart(
+    cx: &mut TestAppContext,
+) {
+    use crate::power::PowerEfficiency as Power;
+    use gpui_kit::Modifiers;
+
+    cx.update(gpui_omarchy::init);
+    let temp = fixture();
+    let config = tempfile::tempdir().expect("config");
+    let (view, cx) = view_over(temp.path(), cx);
+    cx.simulate_resize(gpui_kit::size(px(900.), px(600.)));
+    update(&view, cx, |app, _| {
+        app.power_settings_path = Some(config.path().join("power"));
+        // Aggressive and Drain My Battery would both run four workers.
+        app.cpu_threads = 4;
+        app.power_choice = Some(Power::Balanced);
+    });
+    draw(cx);
+    let toggle = cx.debug_bounds("power-efficiency").expect("control");
+    cx.simulate_mouse_move(toggle.center(), None, Modifiers::none());
+    cx.simulate_click(toggle.center(), Modifiers::none());
+    draw(cx);
+    assert_eq!(read(&view, cx, |app| app.power_menu), Some(1));
+
+    // The pointer takes the highlight, and the check stays on what is saved.
+    let miser = cx.debug_bounds(Power::Miser.key()).expect("row");
+    cx.simulate_mouse_move(miser.center(), None, Modifiers::none());
+    draw(cx);
+    assert_eq!(read(&view, cx, |app| app.power_menu), Some(0));
+    let balanced = cx.debug_bounds(Power::Balanced.key()).expect("row");
+    let check = cx.debug_bounds("power-check").expect("check");
+    assert!(balanced.contains(&check.center()), "check on {check:?}");
+
+    // A disabled row ignores the click and leaves the menu to be dismissed.
+    let drain = cx.debug_bounds(Power::DrainMyBattery.key()).expect("row");
+    cx.simulate_click(drain.center(), Modifiers::none());
+    draw(cx);
+    read(&view, cx, |app| {
+        assert_eq!(app.power_choice, Some(Power::Balanced));
+        assert!(app.notice.is_none());
+    });
+
+    // The arrows step over what is not offered, and Enter chooses.
+    update(&view, cx, |app, cx| {
+        app.power_menu = None;
+        app.toggle_power_menu(cx);
+    });
+    press(cx, "down");
+    assert_eq!(read(&view, cx, |app| app.power_menu), Some(1));
+    press(cx, "up");
+    assert_eq!(read(&view, cx, |app| app.power_menu), Some(0));
+    press(cx, "enter");
+    read(&view, cx, |app| {
+        assert_eq!(app.power_choice, Some(Power::Miser));
+        assert_eq!(app.options.threads.max_threads, 2);
+        assert!(app.power_menu.is_none());
+    });
+
+    // The button closes what it opened, rather than the press outside the
+    // menu closing it only for the click to open it again.
+    draw(cx);
+    let toggle = cx.debug_bounds("power-efficiency").expect("control");
+    cx.simulate_mouse_move(toggle.center(), None, Modifiers::none());
+    cx.simulate_click(toggle.center(), Modifiers::none());
+    draw(cx);
+    assert!(read(&view, cx, |app| app.power_menu.is_some()));
+    cx.simulate_click(toggle.center(), Modifiers::none());
+    draw(cx);
+    assert!(read(&view, cx, |app| app.power_menu.is_none()));
 }

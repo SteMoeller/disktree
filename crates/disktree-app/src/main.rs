@@ -18,6 +18,7 @@ mod git;
 mod i18n;
 mod marks;
 mod palette;
+mod power;
 mod state;
 #[cfg(test)]
 mod tests;
@@ -47,6 +48,7 @@ struct Args {
     depth: u32,
     /// `-A`: ask for the elevated scan before reading a single entry.
     administrator: bool,
+    power: Option<power::PowerEfficiency>,
 }
 
 const USAGE: &str = "\
@@ -69,6 +71,16 @@ options:
                         also measure other disks, network shares and pseudo
                         filesystems mounted below PATH (off by default)
   -d, --depth N         how many levels to draw at once (1-6, default 3)
+      --power-efficiency PRESET
+                        miser, balanced (default), aggressive, drain-my-battery
+      --scan-threads N  fixed scan workers, capped by available CPU count
+      --adaptive-threads
+                        experimental adaptive admission (opt-in)
+      --fixed-threads   disable adaptive admission and CPU governor
+      --thread-throughput-percent N
+                        retain this percent of sampled initial throughput (80)
+      --thread-system-cpu-percent N
+                        best-effort host CPU budget; 0 disables it (80)
       --metric files    rank by file count instead of bytes
   -A, --administrator   start elevated on Windows, before scanning
   -h, --help            show this help
@@ -88,7 +100,16 @@ fn run() -> Result<()> {
     i18n::load();
     // File-type colours, likewise; see `ext_colors`.
     ext_colors::load();
-    let args = parse_args(std::env::args_os().skip(1))?;
+    let saved = power::settings_path()
+        .map_or_else(
+            || Ok(power::PowerEfficiency::default()),
+            |path| power::load(&path),
+        )
+        .unwrap_or_else(|error| {
+            eprintln!("Cannot load Power Efficiency: {error}; using Balanced");
+            power::PowerEfficiency::default()
+        });
+    let args = parse_args_with_power(std::env::args_os().skip(1), saved)?;
 
     // `-A` asks for the elevated scan up front, before a single entry is
     // read: relaunch through the UAC prompt and let this copy exit. Already
@@ -204,12 +225,14 @@ fn run() -> Result<()> {
                             appearance::follow(window);
                         }
                         cx.new(|cx| {
-                            Disktree::new(
+                            let mut app = Disktree::new(
                                 root_for_app.clone(),
                                 options.clone(),
                                 depth,
                                 cx,
-                            )
+                            );
+                            app.power_choice = args.power;
+                            app
                         })
                     },
                 )
@@ -366,11 +389,21 @@ fn start_work_area()
 }
 
 /// Read the command line, program name already skipped.
-fn parse_args(
+#[cfg(test)]
+fn parse_args(args: impl Iterator<Item = std::ffi::OsString>) -> Result<Args> {
+    parse_args_with_power(args, power::PowerEfficiency::default())
+}
+
+fn parse_args_with_power(
     mut args: impl Iterator<Item = std::ffi::OsString>,
+    preset: power::PowerEfficiency,
 ) -> Result<Args> {
     let mut root: Option<PathBuf> = None;
-    let mut options = ScanOptions::default();
+    let mut options = ScanOptions {
+        threads: preset.policy(power::cpu_threads()),
+        ..ScanOptions::default()
+    };
+    let mut power = Some(preset);
     let mut depth = 3_u32;
     let mut disk = false;
     let mut administrator = false;
@@ -405,6 +438,60 @@ fn parse_args(
                     (1..=6).contains(&depth),
                     "--depth must be 1 to 6"
                 );
+            }
+            "--power-efficiency" => {
+                let value =
+                    text(args.next(), "--power-efficiency needs a preset")?;
+                let preset = power::PowerEfficiency::parse(&value)
+                    .context("unknown Power Efficiency preset")?;
+                options.threads = preset.policy(power::cpu_threads());
+                power = Some(preset);
+            }
+            "--scan-threads" => {
+                power = None;
+                let value = text(args.next(), "--scan-threads needs a number")?;
+                options.threads.max_threads = value
+                    .parse()
+                    .context("--scan-threads needs a positive integer")?;
+                anyhow::ensure!(
+                    options.threads.max_threads > 0,
+                    "--scan-threads must be positive"
+                );
+            }
+            "--fixed-threads" => {
+                options.threads.adaptive = false;
+                power = None;
+            }
+            "--adaptive-threads" => {
+                options.threads.adaptive = true;
+                options.threads.system_cpu_limit = Some(0.80);
+                power = None;
+            }
+            "--thread-throughput-percent" => {
+                let value = text(
+                    args.next(),
+                    "--thread-throughput-percent needs a number",
+                )?;
+                let percent: u8 = value
+                    .parse()
+                    .context("throughput percent must be 1 to 100")?;
+                anyhow::ensure!(
+                    (1..=100).contains(&percent),
+                    "throughput percent must be 1 to 100"
+                );
+                options.threads.retained_throughput =
+                    f64::from(percent) / 100.0;
+            }
+            "--thread-system-cpu-percent" => {
+                let value = text(
+                    args.next(),
+                    "--thread-system-cpu-percent needs a number",
+                )?;
+                let percent: u8 =
+                    value.parse().context("CPU percent must be 0 to 100")?;
+                anyhow::ensure!(percent <= 100, "CPU percent must be 0 to 100");
+                options.threads.system_cpu_limit =
+                    (percent > 0).then(|| f64::from(percent) / 100.0);
             }
             "--metric" => {
                 let value = text(args.next(), "--metric needs a value")?;
@@ -457,6 +544,7 @@ fn parse_args(
         options,
         depth: depth.clamp(1, 6),
         administrator,
+        power,
     })
 }
 
@@ -488,6 +576,117 @@ mod console {
         // SAFETY: no arguments; a process without a console is left as is.
         unsafe {
             FreeConsole();
+        }
+    }
+}
+
+#[cfg(test)]
+mod argument_tests {
+    use super::*;
+
+    fn arguments(extra: &[&str]) -> impl Iterator<Item = std::ffi::OsString> {
+        extra
+            .iter()
+            .copied()
+            .chain(std::iter::once("."))
+            .map(std::ffi::OsString::from)
+    }
+
+    #[test]
+    fn adaptive_budget_and_fixed_override_are_explicit() {
+        let args = parse_args(arguments(&[])).expect("defaults");
+        assert_eq!(
+            args.options.threads.max_threads,
+            4.min(power::cpu_threads())
+        );
+        assert!(!args.options.threads.adaptive);
+        let args = parse_args(arguments(&[
+            "--scan-threads",
+            "4",
+            "--fixed-threads",
+            "--thread-throughput-percent",
+            "85",
+            "--thread-system-cpu-percent",
+            "0",
+        ]))
+        .expect("custom");
+        assert_eq!(args.options.threads.max_threads, 4);
+        assert!(!args.options.threads.adaptive);
+        assert!(
+            (args.options.threads.retained_throughput - 0.85).abs()
+                < f64::EPSILON
+        );
+        assert_eq!(args.options.threads.system_cpu_limit, None);
+    }
+
+    #[test]
+    fn saved_power_is_loaded_before_cli_overrides() {
+        use power::PowerEfficiency as Power;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("power-efficiency");
+        power::save(&path, Power::Miser).expect("save");
+        let saved = power::load(&path).expect("load");
+        let args = parse_args_with_power(arguments(&[]), saved).expect("saved");
+        assert_eq!(args.power, Some(Power::Miser));
+        assert_eq!(
+            args.options.threads.max_threads,
+            2.min(power::cpu_threads())
+        );
+        let args = parse_args_with_power(
+            arguments(&["--power-efficiency", "drain-my-battery"]),
+            saved,
+        )
+        .expect("override");
+        assert_eq!(args.power, Some(Power::DrainMyBattery));
+        assert_eq!(args.options.threads.max_threads, power::cpu_threads());
+        let args = parse_args_with_power(
+            arguments(&["--scan-threads", "8", "--adaptive-threads"]),
+            saved,
+        )
+        .expect("experiment");
+        assert!(args.power.is_none());
+        assert!(args.options.threads.adaptive);
+        assert_eq!(args.options.threads.max_threads, 8);
+        assert_eq!(power::load(&path).expect("unchanged"), saved);
+        assert!(
+            parse_args(arguments(&["--power-efficiency", "invalid"])).is_err()
+        );
+    }
+
+    // APFS rejects these filename bytes; Linux filesystems permit them.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn worker_options_preserve_a_non_unicode_root() {
+        use std::os::unix::ffi::OsStringExt as _;
+
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let root = temp
+            .path()
+            .join(std::ffi::OsString::from_vec(vec![b'r', 0xff]));
+        std::fs::create_dir(&root).expect("directory");
+        let args = parse_args(
+            [
+                std::ffi::OsString::from("--scan-threads"),
+                std::ffi::OsString::from("4"),
+                root.clone().into_os_string(),
+            ]
+            .into_iter(),
+        )
+        .expect("native path");
+        assert_eq!(args.root, dunce::canonicalize(root).expect("root"));
+        assert_eq!(args.options.threads.max_threads, 4);
+    }
+
+    #[test]
+    fn invalid_worker_budgets_are_rejected() {
+        for extra in [
+            vec!["--scan-threads", "0"],
+            vec!["--scan-threads", "-1"],
+            vec!["--thread-throughput-percent", "0"],
+            vec!["--thread-throughput-percent", "101"],
+            vec!["--thread-system-cpu-percent", "101"],
+        ] {
+            assert!(parse_args(arguments(&extra)).is_err());
         }
     }
 }

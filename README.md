@@ -261,7 +261,7 @@ and shows how much free space was actually gained.
 | `ctrl =` `ctrl -` `ctrl 0` (`⌘` on macOS) | interface zoom |
 | `/` | filter by name: only matches keep their colour; `enter` shows only them, `esc` clears |
 | `c` | review the marked list |
-| `t` | rank by size or by file count |
+| `t` | size, files or age: what areas and colours say |
 | `d` | disk usage or apparent size |
 | `i` | include or skip hidden entries |
 | `r` | scan again |

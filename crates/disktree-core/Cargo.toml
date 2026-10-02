@@ -40,3 +40,7 @@ trash = { version = "5.2.9", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"
+
+# CPU-only sampling; the GUI dependency graph already pins this version.
+[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
+sysinfo = { version = "0.31.4", default-features = false, features = ["system"] }
