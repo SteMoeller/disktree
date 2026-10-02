@@ -381,9 +381,10 @@ fn start_work_area()
 }
 
 /// Everything but Windows leaves placement to the platform, which centres
-/// the window on the primary display itself.
+/// the window on the primary display itself. `const`, as clippy asks of a
+/// function that just returns `None`.
 #[cfg(not(windows))]
-fn start_work_area()
+const fn start_work_area()
 -> Option<(gpui_kit::DisplayId, gpui_kit::Bounds<gpui_kit::Pixels>)> {
     None
 }
